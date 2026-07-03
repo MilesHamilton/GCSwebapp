@@ -26,7 +26,7 @@ const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
 // aircraft reads at operational zoom. Note: unlike the old pixel icon, a mesh is
 // world-space, so it grows/shrinks with the map.
 const AIRCRAFT_COLOR: Color = [200, 205, 210]
-const AIRCRAFT_SIZE_SCALE = 40
+const AIRCRAFT_SIZE_SCALE = 8
 // getOrientation is [pitch, yaw, roll] in degrees. The model is Y-up; roll 90°
 // stands it upright in deck's Z-up frame. If it renders sideways/inverted at
 // verify, this is the line to tweak.
@@ -71,7 +71,7 @@ function buildLayers() {
       loaders: [OBJLoader],
       getPosition: (d) => d.position,
       getColor: AIRCRAFT_COLOR,
-      getOrientation: (d): [number, number, number] => [0, -d.headingDeg, MODEL_ROLL],
+      getOrientation: (d): [number, number, number] => [0, d.headingDeg, MODEL_ROLL],
       sizeScale: AIRCRAFT_SIZE_SCALE,
       pickable: true,
     }),
