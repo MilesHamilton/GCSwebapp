@@ -1,9 +1,10 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useEffect } from 'react'
 import { Map, useControl } from 'react-map-gl/mapbox'
-import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
+import { MapboxOverlay } from '@deck.gl/mapbox'
 import { useTrackStore } from '../state/trackStore'
 import { buildLayers } from './layers'
+import { startFakeDriver } from '../state/fakeDriver'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
 
@@ -15,30 +16,32 @@ const INITIAL_VIEW_STATE = {
   bearing: 0,
 }
 
-// Adds a deck.gl MapboxOverlay to the Mapbox map as a control (overlaid mode).
-// Mapbox owns the camera; the overlay syncs deck's view to it automatically.
-function DeckOverlay(props: MapboxOverlayProps) {
-  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props))
-  overlay.setProps(props)
+// The hot path. deck lives as a Mapbox control (overlaid). A fake driver feeds the
+// store at ~10 Hz, and an rAF loop reads the store imperatively (getState) and pushes
+// freshly-built layers via setProps — all OFF React's render cycle, so telemetry never
+// triggers a component re-render. This component subscribes to nothing.
+function DeckLayers() {
+  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: false }))
+
+  useEffect(() => {
+    const stop = startFakeDriver()
+    let raf = 0
+    const tick = () => {
+      const { vehicles, trails } = useTrackStore.getState()
+      overlay.setProps({ layers: buildLayers({ vehicles, trails }) })
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      stop()
+      cancelAnimationFrame(raf)
+    }
+  }, [overlay])
+
   return null
 }
 
 export default function MapView() {
-  // Commit 2: render declaratively from the store snapshot. Commit 3 replaces this
-  // subscription + one-shot seed with a fake driver + an rAF loop that pushes layers
-  // via setProps, off React's render path (the real hot path).
-  const vehicles = useTrackStore((s) => s.vehicles)
-  const trails = useTrackStore((s) => s.trails)
-
-  useEffect(() => {
-    useTrackStore.getState().ingest({
-      vehicleId: 'uav-01',
-      position: [-77.0365, 38.8977],
-      headingDeg: 45,
-      ts: Date.now(),
-    })
-  }, [])
-
   if (!MAPBOX_TOKEN) {
     return (
       <div style={{ padding: 24, color: '#f3f4f6', fontFamily: 'system-ui' }}>
@@ -48,8 +51,6 @@ export default function MapView() {
     )
   }
 
-  const layers = buildLayers({ vehicles, trails })
-
   return (
     <Map
       mapboxAccessToken={MAPBOX_TOKEN}
@@ -57,7 +58,7 @@ export default function MapView() {
       mapStyle="mapbox://styles/mapbox/dark-v11"
       style={{ width: '100vw', height: '100vh' }}
     >
-      <DeckOverlay interleaved={false} layers={layers} />
+      <DeckLayers />
     </Map>
   )
 }
