@@ -19,3 +19,5 @@ dist/
 # Raw model drops (cleaned copies live under apps/web/public/models/)
 /apps/web/*.obj
 /apps/web/*.mtl
+*.blend
+*.blend1

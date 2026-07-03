@@ -19,15 +19,31 @@ const INITIAL_VIEW_STATE = {
 type Aircraft = { position: [number, number]; headingDeg: number }
 const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
 
-// Airplane marker as a data-URI SVG (arrow pointing north) so there is no
-// binary asset to manage. IconLayer.getAngle rotates it to the heading.
-const AIRCRAFT_ICON =
-  'data:image/svg+xml;charset=utf-8,' +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">` +
-      `<path d="M24 4 L40 40 L24 32 L8 40 Z" fill="#39d0ff" stroke="#0a2a33" stroke-width="2" stroke-linejoin="round"/>` +
-      `</svg>`,
-  )
+// Aircraft marker. deck's IconLayer reliably loads raster (PNG) URLs but is flaky
+// with SVG data-URIs (they often fail to rasterize into the icon atlas and render
+// nothing), so we draw a north-pointing arrow to a canvas and export a PNG data-URI
+// at load. No binary asset; IconLayer.getAngle rotates it to the heading.
+function makeAircraftIcon(): string {
+  const s = 48
+  const c = document.createElement('canvas')
+  c.width = c.height = s
+  const ctx = c.getContext('2d')
+  if (!ctx) return ''
+  ctx.fillStyle = '#39d0ff'
+  ctx.strokeStyle = '#0a2a33'
+  ctx.lineWidth = 2
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+  ctx.moveTo(24, 4)
+  ctx.lineTo(42, 44)
+  ctx.lineTo(24, 34)
+  ctx.lineTo(6, 44)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  return c.toDataURL()
+}
+const AIRCRAFT_ICON = makeAircraftIcon()
 
 // Phase 1: one hardcoded geozone polygon (a rough box near the aircraft).
 type Geozone = { name: string; polygon: [number, number][] }
