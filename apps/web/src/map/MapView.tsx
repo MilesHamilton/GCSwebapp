@@ -1,7 +1,9 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { Map, useControl } from 'react-map-gl/mapbox'
 import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
-import { IconLayer, PolygonLayer } from '@deck.gl/layers'
+import { PolygonLayer } from '@deck.gl/layers'
+import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
+import { OBJLoader } from '@loaders.gl/obj'
 import type { Color } from '@deck.gl/core'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
@@ -19,31 +21,13 @@ const INITIAL_VIEW_STATE = {
 type Aircraft = { position: [number, number]; headingDeg: number }
 const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
 
-// Aircraft marker. deck's IconLayer reliably loads raster (PNG) URLs but is flaky
-// with SVG data-URIs (they often fail to rasterize into the icon atlas and render
-// nothing), so we draw a north-pointing arrow to a canvas and export a PNG data-URI
-// at load. No binary asset; IconLayer.getAngle rotates it to the heading.
-function makeAircraftIcon(): string {
-  const s = 48
-  const c = document.createElement('canvas')
-  c.width = c.height = s
-  const ctx = c.getContext('2d')
-  if (!ctx) return ''
-  ctx.fillStyle = '#39d0ff'
-  ctx.strokeStyle = '#0a2a33'
-  ctx.lineWidth = 2
-  ctx.lineJoin = 'round'
-  ctx.beginPath()
-  ctx.moveTo(24, 4)
-  ctx.lineTo(42, 44)
-  ctx.lineTo(24, 34)
-  ctx.lineTo(6, 44)
-  ctx.closePath()
-  ctx.fill()
-  ctx.stroke()
-  return c.toDataURL()
-}
-const AIRCRAFT_ICON = makeAircraftIcon()
+// Aircraft rendered as the RQ-180 airframe mesh. PINNED KNOWN ISSUE: via
+// MapboxOverlay the mesh flips orientation at high zoom (deck #5147) — upside-down /
+// SW zoomed in, correct zoomed out. Accepted for v1; proper fix is ScenegraphLayer +
+// glTF. The 2D IconLayer alternative rendered blank (suspect billboard:false).
+const AIRCRAFT_COLOR: Color = [200, 205, 210]
+const AIRCRAFT_SIZE_SCALE = 5
+const HEADING_OFFSET = 90
 
 // Phase 1: one hardcoded geozone polygon (a rough box near the aircraft).
 type Geozone = { name: string; polygon: [number, number][] }
@@ -77,16 +61,15 @@ function buildLayers() {
       filled: true,
       pickable: true,
     }),
-    new IconLayer<Aircraft>({
+    new SimpleMeshLayer<Aircraft>({
       id: 'aircraft',
       data: AIRCRAFT,
+      mesh: '/models/rq-180.obj',
+      loaders: [OBJLoader],
       getPosition: (d) => d.position,
-      getIcon: () => ({ url: AIRCRAFT_ICON, width: 48, height: 48, anchorX: 24, anchorY: 24 }),
-      getSize: 40,
-      sizeUnits: 'pixels',
-      // Arrow SVG points north; deck getAngle is CCW degrees, so -heading rotates it clockwise to the compass heading.
-      getAngle: (d) => -d.headingDeg,
-      billboard: false,
+      getColor: AIRCRAFT_COLOR,
+      getOrientation: (d): [number, number, number] => [0, HEADING_OFFSET - d.headingDeg, 0],
+      sizeScale: AIRCRAFT_SIZE_SCALE,
       pickable: true,
     }),
   ]
