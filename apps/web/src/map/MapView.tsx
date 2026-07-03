@@ -4,7 +4,7 @@ import { Map, useControl } from 'react-map-gl/mapbox'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { useTrackStore } from '../state/trackStore'
 import { buildLayers } from './layers'
-import { startFakeDriver } from '../state/fakeDriver'
+import { startWsClient } from '../ws/client'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
 
@@ -24,7 +24,7 @@ function DeckLayers() {
   const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: false }))
 
   useEffect(() => {
-    const stop = startFakeDriver()
+    const stop = startWsClient()
     let raf = 0
     const tick = () => {
       const { vehicles, trails } = useTrackStore.getState()

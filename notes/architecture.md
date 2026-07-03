@@ -18,11 +18,19 @@ _(your words — optional for setup)_
 
 ## Phase 1 — Static map shell
 
-We created a file MapView that contains aircraft positions and geozones for it, we render our static map using Mapbox GL JS. we are setting a synced state between the mapbox and deck.gl.
+We created a file MapView that contains aircraft positions and geozones for it, we render our static map using Mapbox GL JS. we are setting a synced state between the mapbox and deck.gl. ie. props get added to mapbox and propagate to deck.gl.
 
 ## Phase 2 — Track store + layer factory + fake driver
 
-_(your words)_
+zustand store that tracks hot paths only (cold will be normal react state) (telemetry data). inngest function recieves the data and pushes to store TS buildLayer pulls from store (via rAF loop getState). 
+
+get state is a single method that does a blind read of the store state. We build Layers buildLayers(not deck)
+
+So: the rAF loop reads the store (getState) → we build layers → we push them via `setProps` → deck paints the canvas. deck's only job is the paint.
+
+inngest workflow:   telemetry → ingest() → STORE → (rAF reads via getState) → buildLayers → overlay.setProps → deck canvas
+
+The driver's (mocked WebSocket) `setInterval` (10 Hz) is the *producer*; the rAF loop (~60 fps) is the *consumer*. Neither waits on the other — slow data → rAF redraws the same latest state; fast data → rAF grabs the newest next frame. Producer/consumer decoupled by a shared buffer (the store).
 
 ## Phase 3 — WebSocket transport + telemetry contract
 
