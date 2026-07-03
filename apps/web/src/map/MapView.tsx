@@ -26,11 +26,12 @@ const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
 // aircraft reads at operational zoom. Note: unlike the old pixel icon, a mesh is
 // world-space, so it grows/shrinks with the map.
 const AIRCRAFT_COLOR: Color = [200, 205, 210]
-const AIRCRAFT_SIZE_SCALE = 8
-// getOrientation is [pitch, yaw, roll] in degrees. The model is Y-up; roll 90°
-// stands it upright in deck's Z-up frame. If it renders sideways/inverted at
-// verify, this is the line to tweak.
-const MODEL_ROLL = 90
+const AIRCRAFT_SIZE_SCALE = 5
+// The Y-up -> Z-up rotation is baked into rq-180.obj, so runtime orientation is a
+// single clean yaw about vertical (no Euler coupling / attitude flips). HEADING_OFFSET
+// aligns the model's nose with compass heading — nudge it (0/90/180/270) if the nose
+// points the wrong way after verify.
+const HEADING_OFFSET = 90
 
 // Phase 1: one hardcoded geozone polygon (a rough box near the aircraft).
 type Geozone = { name: string; polygon: [number, number][] }
@@ -71,7 +72,7 @@ function buildLayers() {
       loaders: [OBJLoader],
       getPosition: (d) => d.position,
       getColor: AIRCRAFT_COLOR,
-      getOrientation: (d): [number, number, number] => [0, d.headingDeg, MODEL_ROLL],
+      getOrientation: (d): [number, number, number] => [0, HEADING_OFFSET - d.headingDeg, 0],
       sizeScale: AIRCRAFT_SIZE_SCALE,
       pickable: true,
     }),
