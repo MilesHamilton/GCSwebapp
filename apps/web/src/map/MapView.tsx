@@ -1,9 +1,7 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { Map, useControl } from 'react-map-gl/mapbox'
 import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
-import { PolygonLayer } from '@deck.gl/layers'
-import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
-import { OBJLoader } from '@loaders.gl/obj'
+import { IconLayer, PolygonLayer } from '@deck.gl/layers'
 import type { Color } from '@deck.gl/core'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
@@ -21,17 +19,15 @@ const INITIAL_VIEW_STATE = {
 type Aircraft = { position: [number, number]; headingDeg: number }
 const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
 
-// No .mtl shipped with the OBJ, so the airframe is drawn a flat tactical gray.
-// GCS glyphs aren't to scale — the mesh is exaggerated via sizeScale so a ~40 m
-// aircraft reads at operational zoom. Note: unlike the old pixel icon, a mesh is
-// world-space, so it grows/shrinks with the map.
-const AIRCRAFT_COLOR: Color = [200, 205, 210]
-const AIRCRAFT_SIZE_SCALE = 5
-// The Y-up -> Z-up rotation is baked into rq-180.obj, so runtime orientation is a
-// single clean yaw about vertical (no Euler coupling / attitude flips). HEADING_OFFSET
-// aligns the model's nose with compass heading — nudge it (0/90/180/270) if the nose
-// points the wrong way after verify.
-const HEADING_OFFSET = 90
+// Airplane marker as a data-URI SVG (arrow pointing north) so there is no
+// binary asset to manage. IconLayer.getAngle rotates it to the heading.
+const AIRCRAFT_ICON =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">` +
+      `<path d="M24 4 L40 40 L24 32 L8 40 Z" fill="#39d0ff" stroke="#0a2a33" stroke-width="2" stroke-linejoin="round"/>` +
+      `</svg>`,
+  )
 
 // Phase 1: one hardcoded geozone polygon (a rough box near the aircraft).
 type Geozone = { name: string; polygon: [number, number][] }
@@ -65,15 +61,16 @@ function buildLayers() {
       filled: true,
       pickable: true,
     }),
-    new SimpleMeshLayer<Aircraft>({
+    new IconLayer<Aircraft>({
       id: 'aircraft',
       data: AIRCRAFT,
-      mesh: '/models/rq-180.obj',
-      loaders: [OBJLoader],
       getPosition: (d) => d.position,
-      getColor: AIRCRAFT_COLOR,
-      getOrientation: (d): [number, number, number] => [0, HEADING_OFFSET - d.headingDeg, 0],
-      sizeScale: AIRCRAFT_SIZE_SCALE,
+      getIcon: () => ({ url: AIRCRAFT_ICON, width: 48, height: 48, anchorX: 24, anchorY: 24 }),
+      getSize: 40,
+      sizeUnits: 'pixels',
+      // Arrow SVG points north; deck getAngle is CCW degrees, so -heading rotates it clockwise to the compass heading.
+      getAngle: (d) => -d.headingDeg,
+      billboard: false,
       pickable: true,
     }),
   ]
