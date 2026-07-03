@@ -1,10 +1,9 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { useEffect } from 'react'
 import { Map, useControl } from 'react-map-gl/mapbox'
 import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox'
-import { PolygonLayer } from '@deck.gl/layers'
-import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
-import { OBJLoader } from '@loaders.gl/obj'
-import type { Color } from '@deck.gl/core'
+import { useTrackStore } from '../state/trackStore'
+import { buildLayers } from './layers'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
 
@@ -16,67 +15,7 @@ const INITIAL_VIEW_STATE = {
   bearing: 0,
 }
 
-// Phase 1: one hardcoded aircraft. Position + heading are static here;
-// Phase 2 drives them from the track store.
-type Aircraft = { position: [number, number]; headingDeg: number }
-const AIRCRAFT: Aircraft[] = [{ position: [-77.0365, 38.8977], headingDeg: 45 }]
-
-// Aircraft rendered as the RQ-180 airframe mesh. PINNED KNOWN ISSUE: via
-// MapboxOverlay the mesh flips orientation at high zoom (deck #5147) — upside-down /
-// SW zoomed in, correct zoomed out. Accepted for v1; proper fix is ScenegraphLayer +
-// glTF. The 2D IconLayer alternative rendered blank (suspect billboard:false).
-const AIRCRAFT_COLOR: Color = [200, 205, 210]
-const AIRCRAFT_SIZE_SCALE = 5
-const HEADING_OFFSET = 90
-
-// Phase 1: one hardcoded geozone polygon (a rough box near the aircraft).
-type Geozone = { name: string; polygon: [number, number][] }
-const GEOZONE: Geozone[] = [
-  {
-    name: 'R-1 Restricted',
-    polygon: [
-      [-77.075, 38.875],
-      [-77.0, 38.875],
-      [-77.0, 38.92],
-      [-77.075, 38.92],
-      [-77.075, 38.875],
-    ],
-  },
-]
-
-const ZONE_FILL: Color = [255, 80, 80, 40]
-const ZONE_LINE: Color = [255, 80, 80, 200]
-
-function buildLayers() {
-  return [
-    new PolygonLayer<Geozone>({
-      id: 'geozones',
-      data: GEOZONE,
-      getPolygon: (d) => d.polygon,
-      getFillColor: ZONE_FILL,
-      getLineColor: ZONE_LINE,
-      getLineWidth: 2,
-      lineWidthUnits: 'pixels',
-      stroked: true,
-      filled: true,
-      pickable: true,
-    }),
-    new SimpleMeshLayer<Aircraft>({
-      id: 'aircraft',
-      data: AIRCRAFT,
-      mesh: '/models/rq-180.obj',
-      loaders: [OBJLoader],
-      getPosition: (d) => d.position,
-      getColor: AIRCRAFT_COLOR,
-      getOrientation: (d): [number, number, number] => [0, HEADING_OFFSET - d.headingDeg, 0],
-      sizeScale: AIRCRAFT_SIZE_SCALE,
-      pickable: true,
-    }),
-  ]
-}
-
-// Adds a deck.gl MapboxOverlay to the Mapbox map as a control.
-// interleaved:false = OVERLAID — deck paints its own canvas above Mapbox.
+// Adds a deck.gl MapboxOverlay to the Mapbox map as a control (overlaid mode).
 // Mapbox owns the camera; the overlay syncs deck's view to it automatically.
 function DeckOverlay(props: MapboxOverlayProps) {
   const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props))
@@ -85,6 +24,21 @@ function DeckOverlay(props: MapboxOverlayProps) {
 }
 
 export default function MapView() {
+  // Commit 2: render declaratively from the store snapshot. Commit 3 replaces this
+  // subscription + one-shot seed with a fake driver + an rAF loop that pushes layers
+  // via setProps, off React's render path (the real hot path).
+  const vehicles = useTrackStore((s) => s.vehicles)
+  const trails = useTrackStore((s) => s.trails)
+
+  useEffect(() => {
+    useTrackStore.getState().ingest({
+      vehicleId: 'uav-01',
+      position: [-77.0365, 38.8977],
+      headingDeg: 45,
+      ts: Date.now(),
+    })
+  }, [])
+
   if (!MAPBOX_TOKEN) {
     return (
       <div style={{ padding: 24, color: '#f3f4f6', fontFamily: 'system-ui' }}>
@@ -94,6 +48,8 @@ export default function MapView() {
     )
   }
 
+  const layers = buildLayers({ vehicles, trails })
+
   return (
     <Map
       mapboxAccessToken={MAPBOX_TOKEN}
@@ -101,7 +57,7 @@ export default function MapView() {
       mapStyle="mapbox://styles/mapbox/dark-v11"
       style={{ width: '100vw', height: '100vh' }}
     >
-      <DeckOverlay interleaved={false} layers={buildLayers()} />
+      <DeckOverlay interleaved={false} layers={layers} />
     </Map>
   )
 }
