@@ -18,7 +18,7 @@ _(your words — optional for setup)_
 
 ## Phase 1 — Static map shell
 
-_(your words)_
+We created a file MapView that contains aircraft positions and geozones for it, we render our static map using Mapbox GL JS. we are setting a synced state between the mapbox and deck.gl.
 
 ## Phase 2 — Track store + layer factory + fake driver
 
