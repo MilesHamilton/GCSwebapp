@@ -2,8 +2,8 @@ import { create } from 'zustand'
 
 // The "hot lane": live vehicle state, updated on every telemetry tick. The render
 // loop reads it imperatively via useTrackStore.getState() so high-frequency updates
-// never trigger React re-renders. UI that wants a readout can subscribe with a
-// selector (that's the cold-lane use of the same store).
+// never trigger React re-renders. Geozones (cold mission data) also live here — set
+// once from the snapshot and read by the same loop.
 
 // Positions are [longitude, latitude] to match deck.gl's coordinate order.
 export type TimedPoint = { coordinates: [number, number]; timestamp: number }
@@ -15,8 +15,7 @@ export type Vehicle = {
   updatedAt: number
 }
 
-// One normalized telemetry sample. Phase 3 maps the WebSocket `telemetry` message
-// onto this shape; Phase 2's fake driver produces it directly.
+// One normalized telemetry sample (the WebSocket parser maps the wire message onto this).
 export type TelemetrySample = {
   vehicleId: string
   position: [number, number]
@@ -24,19 +23,24 @@ export type TelemetrySample = {
   ts: number
 }
 
+export type Geozone = { name: string; polygon: [number, number][] }
+
 // Bounded trail so memory stays flat during long flights (ring-buffer semantics).
 const MAX_TRAIL_POINTS = 500
 
 type TrackState = {
   vehicles: Record<string, Vehicle>
   trails: Record<string, TimedPoint[]>
+  geozones: Geozone[]
   ingest: (sample: TelemetrySample) => void
+  setGeozones: (geozones: Geozone[]) => void
   clear: () => void
 }
 
 export const useTrackStore = create<TrackState>()((set) => ({
   vehicles: {},
   trails: {},
+  geozones: [],
   ingest: (s) =>
     set((state) => {
       const trail = [
@@ -57,5 +61,6 @@ export const useTrackStore = create<TrackState>()((set) => ({
         trails: { ...state.trails, [s.vehicleId]: trail },
       }
     }),
-  clear: () => set({ vehicles: {}, trails: {} }),
+  setGeozones: (geozones) => set({ geozones }),
+  clear: () => set({ vehicles: {}, trails: {}, geozones: [] }),
 }))

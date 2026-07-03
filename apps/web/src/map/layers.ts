@@ -2,12 +2,14 @@ import { PolygonLayer, PathLayer } from '@deck.gl/layers'
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import { OBJLoader } from '@loaders.gl/obj'
 import type { Color } from '@deck.gl/core'
-import type { Vehicle, TimedPoint } from '../state/trackStore'
+import type { Vehicle, TimedPoint, Geozone } from '../state/trackStore'
 
-// A read-only snapshot of the hot lane. The factory turns it into deck layers.
+// A read-only snapshot of the world (hot vehicles/trails + cold geozones). The
+// factory turns it into deck layers. Called by the render path, not React.
 export type WorldSnapshot = {
   vehicles: Record<string, Vehicle>
   trails: Record<string, TimedPoint[]>
+  geozones: Geozone[]
 }
 
 // --- Aircraft (RQ-180 mesh). PINNED: zoom-flip is a known deck limitation (#5147);
@@ -16,29 +18,12 @@ const AIRCRAFT_COLOR: Color = [200, 205, 210]
 const AIRCRAFT_SIZE_SCALE = 5
 const HEADING_OFFSET = 90
 
-// --- Trail
 const TRAIL_COLOR: Color = [57, 208, 255, 180]
-
-// --- Geozone: mission data (cold lane); static config for now.
-type Geozone = { name: string; polygon: [number, number][] }
-const GEOZONES: Geozone[] = [
-  {
-    name: 'R-1 Restricted',
-    polygon: [
-      [-77.075, 38.875],
-      [-77.0, 38.875],
-      [-77.0, 38.92],
-      [-77.075, 38.92],
-      [-77.075, 38.875],
-    ],
-  },
-]
 const ZONE_FILL: Color = [255, 80, 80, 40]
 const ZONE_LINE: Color = [255, 80, 80, 200]
 
 type Trail = { id: string; points: TimedPoint[] }
 
-// Pure function: world snapshot -> deck layers. Called by the render path, not React.
 export function buildLayers(world: WorldSnapshot) {
   const vehicles = Object.values(world.vehicles)
   // A PathLayer path needs >= 2 points; skip trails that are just a seed point.
@@ -49,7 +34,7 @@ export function buildLayers(world: WorldSnapshot) {
   return [
     new PolygonLayer<Geozone>({
       id: 'geozones',
-      data: GEOZONES,
+      data: world.geozones,
       getPolygon: (d) => d.polygon,
       getFillColor: ZONE_FILL,
       getLineColor: ZONE_LINE,

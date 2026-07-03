@@ -1,26 +1,32 @@
 import { useTrackStore, type TelemetrySample } from '../state/trackStore'
-import type { ServerMessage, TelemetryMsg } from './types'
+import type { ServerMessage, VehicleState } from './types'
 
 const WS_URL = 'ws://localhost:8000/ws'
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 5000
 
-// Normalize the rich wire telemetry -> the lean store sample (wire shape != store shape).
-function toSample(m: TelemetryMsg): TelemetrySample {
+// Normalize rich wire vehicle state -> the lean store sample (wire shape != store shape).
+function toSample(v: VehicleState, ts: number): TelemetrySample {
   return {
-    vehicleId: m.vehicleId,
-    position: [m.position.lng, m.position.lat],
-    headingDeg: m.attitude.yawDeg,
-    ts: m.ts,
+    vehicleId: v.vehicleId,
+    position: [v.position.lng, v.position.lat],
+    headingDeg: v.attitude.yawDeg,
+    ts,
   }
 }
 
 function handle(msg: ServerMessage): void {
+  const store = useTrackStore.getState()
   switch (msg.type) {
     case 'telemetry':
-      useTrackStore.getState().ingest(toSample(msg))
+      store.ingest(toSample(msg, msg.ts))
       break
-    // mission -> cold lane (Phase 5), event -> alerts, snapshot -> commit 4, replay -> Phase 4
+    case 'snapshot':
+      // late-joiner bootstrap: cold mission data + current vehicle positions
+      store.setGeozones(msg.geozones)
+      msg.vehicles.forEach((v) => store.ingest(toSample(v, msg.ts)))
+      break
+    // mission -> cold lane (Phase 5), event -> alerts, replay -> Phase 4
     default:
       break
   }

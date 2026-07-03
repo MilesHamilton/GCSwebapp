@@ -27,8 +27,8 @@ function DeckLayers() {
     const stop = startWsClient()
     let raf = 0
     const tick = () => {
-      const { vehicles, trails } = useTrackStore.getState()
-      overlay.setProps({ layers: buildLayers({ vehicles, trails }) })
+      const { vehicles, trails, geozones } = useTrackStore.getState()
+      overlay.setProps({ layers: buildLayers({ vehicles, trails, geozones }) })
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)

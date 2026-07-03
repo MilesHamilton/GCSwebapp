@@ -6,7 +6,7 @@ is a pure function of elapsed time, so the world is consistent for any client.
 
 import math
 
-from schemas import Attitude, Position, TelemetryMsg, Velocity
+from schemas import Attitude, Geozone, Position, SnapshotMsg, TelemetryMsg, VehicleState, Velocity
 
 CENTER_LNG = -77.0365
 CENTER_LAT = 38.8977
@@ -30,3 +30,31 @@ def telemetry_at(elapsed_s: float, ts_ms: int, vehicle_id: str = "uav-01") -> Te
         attitude=Attitude(yawDeg=heading_deg),
         velocity=Velocity(groundSpeedMps=GROUND_SPEED_MPS),
     )
+
+
+# Mission data (cold): served in the snapshot so a late joiner sees zones it would
+# otherwise miss — they aren't in the telemetry stream.
+GEOZONES = [
+    Geozone(
+        name="R-1 Restricted",
+        polygon=[
+            (-77.075, 38.875),
+            (-77.0, 38.875),
+            (-77.0, 38.92),
+            (-77.075, 38.92),
+            (-77.075, 38.875),
+        ],
+    ),
+]
+
+
+def snapshot_at(elapsed_s: float, ts_ms: int) -> SnapshotMsg:
+    t = telemetry_at(elapsed_s, ts_ms)
+    vehicle = VehicleState(
+        vehicleId=t.vehicleId,
+        position=t.position,
+        attitude=t.attitude,
+        velocity=t.velocity,
+        status=t.status,
+    )
+    return SnapshotMsg(ts=ts_ms, vehicles=[vehicle], geozones=GEOZONES)
