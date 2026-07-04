@@ -5,9 +5,8 @@ import { create } from 'zustand'
 // never trigger React re-renders. Geozones (cold mission data) also live here — set
 // once from the snapshot and read by the same loop.
 
-// Positions are [longitude, latitude] to match deck.gl's coordinate order. altM lets the
-// trail render at the flight's real altitude in 3D (not flat on the ground).
-export type TimedPoint = { coordinates: [number, number]; timestamp: number; altM: number }
+// Positions are [longitude, latitude] to match deck.gl's coordinate order.
+export type TimedPoint = { coordinates: [number, number]; timestamp: number }
 
 export type Vehicle = {
   id: string
@@ -62,7 +61,7 @@ export const useTrackStore = create<TrackState>()((set) => ({
   isRecording: false,
   ingest: (s) =>
     set((state) => {
-      const trail = [...(state.trails[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts, altM: s.altM }]
+      const trail = [...(state.trails[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts }]
       if (trail.length > MAX_TRAIL_POINTS) trail.splice(0, trail.length - MAX_TRAIL_POINTS)
       const next: Partial<TrackState> = {
         vehicles: {
@@ -83,7 +82,7 @@ export const useTrackStore = create<TrackState>()((set) => ({
       if (state.isRecording) {
         next.recording = {
           ...state.recording,
-          [s.vehicleId]: [...(state.recording[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts, altM: s.altM }],
+          [s.vehicleId]: [...(state.recording[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts }],
         }
       }
       return next

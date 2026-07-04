@@ -29,7 +29,6 @@ const HEADING_OFFSET = 90
 const TRAIL_COLOR: Color = [57, 208, 255, 220]
 const ZONE_FILL: Color = [255, 80, 80, 40]
 const ZONE_LINE: Color = [255, 80, 80, 200]
-const GEOZONE_HEIGHT_M = 2000 // extrude the zone into a floor->2 km airspace volume (not a flat patch)
 
 // TripsLayer stores timestamps as float32, which loses precision on raw epoch-ms
 // (~1.7e12). Normalize to a small base per frame so the trail renders cleanly.
@@ -48,15 +47,6 @@ export function buildLayers(frame: RenderFrame) {
       data: frame.geozones,
       visible: frame.visibility.geozones,
       getPolygon: (d) => d.polygon,
-      // A restricted area has vertical extent — render it as a translucent airspace
-      // volume rather than a flat patch that sinks into the terrain.
-      extruded: true,
-      getElevation: GEOZONE_HEIGHT_M,
-      material: false, // flat color, no lighting on the walls
-      wireframe: true,
-      // The aircraft loiters INSIDE this volume; don't let the translucent walls write
-      // depth or they'd occlude the craft/trail behind them.
-      parameters: { depthWriteEnabled: false },
       getFillColor: ZONE_FILL,
       getLineColor: ZONE_LINE,
       getLineWidth: 2,
@@ -69,7 +59,7 @@ export function buildLayers(frame: RenderFrame) {
       id: 'trails',
       data: trails,
       visible: frame.visibility.trail,
-      getPath: (t) => t.points.map((p): [number, number, number] => [p.coordinates[0], p.coordinates[1], p.altM]),
+      getPath: (t) => t.points.map((p) => p.coordinates),
       getTimestamps: (t) => t.points.map((p) => p.timestamp - base),
       getColor: TRAIL_COLOR,
       getWidth: 2,
