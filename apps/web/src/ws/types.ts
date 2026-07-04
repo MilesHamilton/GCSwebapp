@@ -26,6 +26,27 @@ export type EventMsg = {
 }
 export type SnapshotMsg = { type: 'snapshot'; ts: number; vehicles: VehicleState[]; geozones: Geozone[] }
 export type ReplayMsg = { type: 'replay'; ts: number; action: 'chunk' | 'play' | 'pause' | 'seek' }
+export type CommandAckMsg = {
+  type: 'commandAck'
+  ts: number
+  commandId: string
+  accepted: boolean
+  reason?: string | null
+}
 
 // Discriminated union: switch on `type` to route each message.
-export type ServerMessage = TelemetryMsg | MissionMsg | EventMsg | SnapshotMsg | ReplayMsg
+export type ServerMessage = TelemetryMsg | MissionMsg | EventMsg | SnapshotMsg | ReplayMsg | CommandAckMsg
+
+// --- client -> server commands (the first uplink) ---
+// Nullable/omitted fields mean "leave unchanged" (mirrors the server's type_mask idea).
+export type HsaCommand = { kind: 'hsa'; headingDeg?: number | null; speedMps?: number | null; altM?: number | null }
+export type LoiterCommand = {
+  kind: 'loiter'
+  centerLng?: number | null
+  centerLat?: number | null
+  radiusM?: number | null
+  direction?: 'cw' | 'ccw' | null
+  altM?: number | null
+}
+export type Command = HsaCommand | LoiterCommand
+export type CommandMsg = { type: 'command'; ts: number; vehicleId?: string; commandId: string; command: Command }

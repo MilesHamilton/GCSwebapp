@@ -80,8 +80,51 @@ class ReplayMsg(BaseModel):
     action: Literal["chunk", "play", "pause", "seek"] = "chunk"
 
 
+class CommandAckMsg(BaseModel):
+    type: Literal["commandAck"] = "commandAck"
+    ts: int
+    commandId: str  # echoes the command it answers
+    accepted: bool
+    reason: str | None = None  # human-readable when rejected (e.g. violates a vehicle limit)
+
+
 # Discriminated union: pydantic validates/parses by the `type` tag.
 ServerMessage = Annotated[
-    Union[TelemetryMsg, MissionMsg, EventMsg, SnapshotMsg, ReplayMsg],
+    Union[TelemetryMsg, MissionMsg, EventMsg, SnapshotMsg, ReplayMsg, CommandAckMsg],
     Field(discriminator="type"),
 ]
+
+
+# --- client -> server commands (the first uplink) ---
+# A command carries *intent* (setpoints); the server owns the truth and integrates it.
+# Nullable fields mean "leave unchanged" — the clean equivalent of MAVLink's type_mask.
+class HsaCommand(BaseModel):
+    kind: Literal["hsa"] = "hsa"
+    headingDeg: float | None = None
+    speedMps: float | None = None
+    altM: float | None = None
+
+
+class LoiterCommand(BaseModel):
+    kind: Literal["loiter"] = "loiter"
+    centerLng: float | None = None  # None = loiter about the current position
+    centerLat: float | None = None
+    radiusM: float | None = None  # None = keep the current radius
+    direction: Literal["cw", "ccw"] | None = None  # None = keep the current direction
+    altM: float | None = None
+
+
+Command = Annotated[Union[HsaCommand, LoiterCommand], Field(discriminator="kind")]
+
+
+class CommandMsg(BaseModel):
+    type: Literal["command"] = "command"
+    ts: int
+    vehicleId: str = "uav-01"
+    commandId: str  # client-generated; echoed back in the ack
+    command: Command
+
+
+# What a client may send up. A one-member union for now, kept in the discriminated
+# style so more uplink types slot in later without changing the parse site.
+ClientMessage = CommandMsg
