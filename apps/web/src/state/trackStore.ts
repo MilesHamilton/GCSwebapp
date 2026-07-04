@@ -13,6 +13,12 @@ export type Vehicle = {
   position: [number, number]
   headingDeg: number
   updatedAt: number
+  // Extra telemetry for the operator HUD panel (Phase 5). Optional: replay-sampled
+  // vehicles (from the position-only recording) don't carry them.
+  altM?: number
+  speedMps?: number
+  mode?: string
+  batteryPct?: number
 }
 
 // One normalized telemetry sample (the WebSocket parser maps the wire message onto this).
@@ -21,6 +27,10 @@ export type TelemetrySample = {
   position: [number, number]
   headingDeg: number
   ts: number
+  altM: number
+  speedMps: number
+  mode: string
+  batteryPct: number
 }
 
 export type Geozone = { name: string; polygon: [number, number][] }
@@ -32,8 +42,14 @@ type TrackState = {
   vehicles: Record<string, Vehicle>
   trails: Record<string, TimedPoint[]>
   geozones: Geozone[]
+  // Phase 4 replay: an UNCAPPED per-vehicle recording (the live trail is capped at 500;
+  // replay needs full history). Written on the hot path only while `isRecording`.
+  recording: Record<string, TimedPoint[]>
+  isRecording: boolean
   ingest: (sample: TelemetrySample) => void
   setGeozones: (geozones: Geozone[]) => void
+  startRecording: () => void
+  stopRecording: () => void
   clear: () => void
 }
 
@@ -41,14 +57,13 @@ export const useTrackStore = create<TrackState>()((set) => ({
   vehicles: {},
   trails: {},
   geozones: [],
+  recording: {},
+  isRecording: false,
   ingest: (s) =>
     set((state) => {
-      const trail = [
-        ...(state.trails[s.vehicleId] ?? []),
-        { coordinates: s.position, timestamp: s.ts },
-      ]
+      const trail = [...(state.trails[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts }]
       if (trail.length > MAX_TRAIL_POINTS) trail.splice(0, trail.length - MAX_TRAIL_POINTS)
-      return {
+      const next: Partial<TrackState> = {
         vehicles: {
           ...state.vehicles,
           [s.vehicleId]: {
@@ -56,11 +71,24 @@ export const useTrackStore = create<TrackState>()((set) => ({
             position: s.position,
             headingDeg: s.headingDeg,
             updatedAt: s.ts,
+            altM: s.altM,
+            speedMps: s.speedMps,
+            mode: s.mode,
+            batteryPct: s.batteryPct,
           },
         },
         trails: { ...state.trails, [s.vehicleId]: trail },
       }
+      if (state.isRecording) {
+        next.recording = {
+          ...state.recording,
+          [s.vehicleId]: [...(state.recording[s.vehicleId] ?? []), { coordinates: s.position, timestamp: s.ts }],
+        }
+      }
+      return next
     }),
   setGeozones: (geozones) => set({ geozones }),
-  clear: () => set({ vehicles: {}, trails: {}, geozones: [] }),
+  startRecording: () => set({ isRecording: true, recording: {} }),
+  stopRecording: () => set({ isRecording: false }),
+  clear: () => set({ vehicles: {}, trails: {}, geozones: [], recording: {}, isRecording: false }),
 }))
