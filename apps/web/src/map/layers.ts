@@ -54,6 +54,9 @@ export function buildLayers(frame: RenderFrame) {
       getElevation: GEOZONE_HEIGHT_M,
       material: false, // flat color, no lighting on the walls
       wireframe: true,
+      // The aircraft loiters INSIDE this volume; don't let the translucent walls write
+      // depth or they'd occlude the craft/trail behind them.
+      parameters: { depthWriteEnabled: false },
       getFillColor: ZONE_FILL,
       getLineColor: ZONE_LINE,
       getLineWidth: 2,
