@@ -1,9 +1,11 @@
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
+from schemas import CommandAckMsg, CommandMsg
 from sim import VehicleSim
 
 TICK_S = 0.1  # 10 Hz: both the sim step and the telemetry emit
@@ -42,13 +44,38 @@ def health() -> dict[str, str]:
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
-    """Stream the shared sim's telemetry to a client at ~10 Hz until it disconnects."""
+    """Full-duplex link: stream telemetry down while accepting commands up, concurrently."""
     await websocket.accept()
-    try:
-        # snapshot-on-connect: full current world state so a late joiner is whole.
-        await websocket.send_text(sim.snapshot().model_dump_json())
+    # snapshot-on-connect: full current world state so a late joiner is whole.
+    await websocket.send_text(sim.snapshot().model_dump_json())
+
+    async def sender() -> None:
         while True:
             await websocket.send_text(sim.telemetry().model_dump_json())
             await asyncio.sleep(TICK_S)
-    except (WebSocketDisconnect, RuntimeError):
-        return
+
+    async def receiver() -> None:
+        while True:
+            raw = await websocket.receive_text()
+            # validate at the boundary; a malformed command is rejected, never trusted.
+            try:
+                msg = CommandMsg.model_validate_json(raw)
+            except ValidationError:
+                ack = CommandAckMsg(ts=int(time.time() * 1000), commandId="", accepted=False, reason="invalid command")
+                await websocket.send_text(ack.model_dump_json())
+                continue
+            accepted, reason = sim.apply(msg.command)  # mutate the one shared sim
+            ack = CommandAckMsg(ts=int(time.time() * 1000), commandId=msg.commandId, accepted=accepted, reason=reason)
+            await websocket.send_text(ack.model_dump_json())
+
+    # Run both directions concurrently; when either ends (usually a disconnect on
+    # the receiver), cancel the other and tear the connection down cleanly.
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for t in pending:
+        t.cancel()
+        with suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+            await t
+    for t in done:
+        with suppress(WebSocketDisconnect, RuntimeError):
+            t.result()
