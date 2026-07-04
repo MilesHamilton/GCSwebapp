@@ -1,5 +1,6 @@
 import { useTrackStore, type TelemetrySample } from '../state/trackStore'
 import { useCommandStore } from '../state/commandStore'
+import { useUiStore } from '../state/uiStore'
 import type { Command, CommandMsg, ServerMessage, VehicleState } from './types'
 
 const WS_URL = 'ws://localhost:8000/ws'
@@ -17,6 +18,10 @@ function toSample(v: VehicleState, ts: number): TelemetrySample {
     position: [v.position.lng, v.position.lat],
     headingDeg: v.attitude.yawDeg,
     ts,
+    altM: v.position.altM ?? 0,
+    speedMps: v.velocity?.groundSpeedMps ?? 0,
+    mode: v.status?.mode ?? '',
+    batteryPct: v.status?.batteryPct ?? 0,
   }
 }
 
@@ -66,6 +71,7 @@ export function startWsClient(url = WS_URL): () => void {
     socket.onopen = () => {
       backoff = BACKOFF_MIN_MS
       activeSocket = socket
+      useUiStore.getState().setConnected(true)
       console.info('[ws] connected', url)
     }
 
@@ -79,6 +85,7 @@ export function startWsClient(url = WS_URL): () => void {
 
     socket.onclose = () => {
       if (socket === activeSocket) activeSocket = null
+      useUiStore.getState().setConnected(false)
       if (stopped) return
       console.warn(`[ws] disconnected; retrying in ${backoff}ms`)
       retry = setTimeout(connect, backoff)
