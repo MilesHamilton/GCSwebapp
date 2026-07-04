@@ -89,6 +89,10 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
 | **3** | WebSocket transport + telemetry contract | 5 message types *vs one blob* · snapshot-on-connect · reconnect/backoff · validate at boundary | timer removed, backend drives it · refresh mid-flight → snapshot restores · drop server → reconnects |
 | **4** | Replay | `TimedPoint` reused live+replay · live *vs replay* mode · where the clock lives | record a flight · scrub the timeline · trail animates to cursor |
 | **5** | Operator HUD + camera sync | camera imperative `flyTo` *vs declarative `viewState`* · selection in cold lane | click aircraft → card fills · toggle geozone · follow → camera tracks |
+| | **▸ Milestone 2 — fake flight autonomy computer** | | |
+| **6** | Stateful flight model (autonomy core) | stateful `step(dt)` *vs closed-form `f(t)`* · 3-DOF point-mass *vs 6-DOF* · one shared sim *vs per-connection* | circle now *emerges* from an integrated loiter law · sim is one shared stateful object · frontend untouched |
+| **7** | Command uplink (HSA + loiter/CAP) | command on existing `/ws` *vs REST / 2nd socket* · typed union *vs MAVLink `COMMAND_LONG`* · loiter = tangent reusing the HSA heading loop *vs a separate orbit integrator* | send HSA → aircraft slews & holds · loiter → CAP orbit · infeasible cmd → rejected + reason |
+| **8** | Dockerize the autonomy computer | single api container *vs separate autonomy container over a bus* · web on host *vs containerized (WSL2 HMR)* | `docker compose up` → api streams · host web flies & commands · edit `.py` → hot reload |
 
 ---
 
@@ -208,3 +212,157 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
   hides/shows the polygon; enabling follow keeps the camera tracking the aircraft.
 - **Commits:** `feat: HUD vehicle card + conn status` ·
   `feat: camera follow/sync` · `feat: layer visibility toggles`
+
+---
+
+## Milestone 2 — Fake flight autonomy computer
+
+Phases 0–5 make a **playback**: `telemetry_at(t)` returns the aircraft's position
+as a *pure function of time* (a scripted circle). A flight **autonomy computer**
+isn't playback — it **holds vehicle state, accepts commands, and flies itself**
+toward them within the airframe's limits. This milestone makes that shift — the
+same one real software-in-the-loop sims (ArduPilot / PX4 SITL) are built around:
+
+- **Stateless → stateful.** `telemetry_at(t)` becomes `VehicleSim.step(dt)` — a
+  fixed-timestep integrator carrying `{lat, lng, alt, heading, speed}` forward.
+  The old circle survives as the *steady state* of a loiter law, not a script.
+- **First uplink.** Everything so far is downlink; commands now ride the *same*
+  `/ws` as a new `command` message, acknowledged with `commandAck`.
+- **The commands.** **HSA** (heading / speed / altitude setpoints) and **Loiter
+  / CAP** (a circular orbit) — the two the fake autopilot tracks.
+- **Vehicle characteristics as clamps.** An RQ-180 stand-in supplies the *only*
+  physics that matters here: how fast it may turn, climb, and accelerate.
+- **Docker.** Package the sim as a reproducible, isolated service.
+
+**RQ-180 stand-in.** The RQ-180 is classified, so these are open-source
+*estimates* (gaps filled from its sibling, the RQ-4 Global Hawk) — deliberate,
+swappable constants, stored in SI to match the wire contract:
+
+| Characteristic | Estimate (SI) | Role in the sim |
+|---|---|---|
+| Cruise speed | ~42 m/s\* | default ground speed |
+| Speed envelope | 30–60 m/s | clamps commanded speed |
+| Max bank | 25° | → max turn rate `ω = g·tan φ / V` |
+| Max climb/descent | 8 m/s | clamps commanded altitude rate |
+| Max accel | 2 m/s² | clamps the speed ramp |
+| Service ceiling | ~18 km | clamps commanded altitude |
+
+\* *Kept at today's ~42 m/s for map-scale continuity; the realistic RQ-180 cruise
+(~175 m/s) is a one-constant swap — logged as the rejected alternative.*
+
+> **Build-order note:** the sim + command work (6–7) is the interesting part, so
+> it comes first and Docker (8) packages it last. If you'd rather develop
+> everything inside the container from the start, pull Phase 8 to the front — it
+> wraps the *current* app unchanged, so it reorders cleanly.
+
+### Phase 6 — Stateful flight model (autonomy core)
+
+- **Slice:** replace the stateless `telemetry_at(t)` with a **single, shared,
+  stateful `VehicleSim`** stepped by **one** background task at a fixed `dt`
+  (10 Hz), plus a `vehicle.py` `VehicleCharacteristics` (the RQ-180 stand-in)
+  that supplies the clamps. **No commands yet** — the default mode is a loiter
+  whose steady state *reproduces today's circle*, so nothing visibly regresses.
+  Telemetry/snapshot wire shapes are **unchanged** (`status.mode`, `rollDeg`
+  already exist).
+- **Seed question (you draft first):** *Today position is a pure function of time
+  (`telemetry_at(t)`). Why must the sim become **stateful** — integrating state
+  forward — before it can accept commands? What can't you express as `f(t)` once
+  the requirement is "turn toward heading X at no more than the airframe's max
+  turn rate, then hold"? And why must there be **exactly one** sim instance
+  stepped by **one** clock, not one per WebSocket connection?*
+- **Key decisions → alternative rejected:**
+  - Stateful integrating `step(dt)` *vs keeping closed-form `telemetry_at(t)`* →
+    setpoint tracking under rate limits has no clean closed form; a tiny Euler
+    integrator is simpler and is exactly how a real autopilot loop works.
+  - **3-DOF point-mass (kinematic)** *vs 6-DOF rigid body + aero* → we need a
+    believable track that respects limits, not flight-dynamics fidelity; 6-DOF
+    needs an aero database and a fast inner loop we'd have to justify.
+  - **One shared sim stepped by a single background task** *vs a sim per `/ws`
+    connection* → per-connection forks the world, double-steps with two clients,
+    and freezes with zero; one owner keeps a single authoritative world that
+    keeps flying with no GCS attached, and `snapshot`-on-connect still bootstraps
+    late joiners.
+  - Attitude **derived** (`yaw = heading`, roll from turn rate) *vs integrated as
+    state* → derivation is exact for a point mass, drift-free, and adds no state.
+  - **Fixed `dt`** paced by wall-clock sleep *vs variable `dt` from measured
+    deltas* → fixed `dt` keeps dynamics deterministic and Euler bounds valid; a
+    stall under variable `dt` causes a large integration jump.
+  - Vehicle limits as **clamps** *vs hardcoded motion* → the RQ-180 config *is*
+    the physics; max bank sets the max turn rate via `ω = g·tan φ / V`.
+- **Done when:** the aircraft still circles, but the circle now *emerges* from an
+  integrated loiter law rather than a scripted path; the sim is a single shared
+  stateful object; console clean; the frontend is untouched.
+- **Commits:** `feat: vehicle characteristics (RQ-180 clamps)` ·
+  `feat: stateful VehicleSim.step(dt)` · `feat: single-clock sim loop`
+
+### Phase 7 — Command uplink (HSA + loiter/CAP)
+
+- **Slice:** the app's **first uplink**. Add `command` (client→server) and
+  `commandAck` (server→client) to the wire contract; make `/ws` **full-duplex**
+  (concurrent sender + receiver tasks); `VehicleSim.apply(cmd)` flips mode +
+  setpoints; implement the two guidance laws — **HSA** (rate-limited heading /
+  speed / altitude capture) and **Loiter/CAP** (tangent-to-orbit heading fed into
+  the *same* heading loop). Add a minimal cold-lane `CommandPanel` to send them.
+- **Seed question (you draft first):** *Everything so far is downlink. What
+  changes when you add an uplink on the **same** socket — how do you send and
+  receive on one WebSocket at once? Why model commands as **setpoints the server
+  tracks** (server-authoritative) rather than the client computing positions? And
+  why is Loiter "just HSA with a heading that's recomputed every tick"?*
+- **Key decisions → alternative rejected:**
+  - Command on the **existing `/ws`** (full-duplex via `asyncio.gather`/`wait`)
+    *vs a REST endpoint or a second socket* → a real datalink is one bidirectional
+    link; keeps command + telemetry + ack correlated on one lifecycle.
+  - **Typed discriminated-union command** (nullable = "leave unchanged", `cw/ccw`
+    enum) *vs re-encoding MAVLink `COMMAND_LONG` (`param1..7` + `type_mask`)* →
+    self-documenting and pydantic/TS-validated; you can still point at the MAVLink
+    primitive each field distills (`type_mask` → nullable, sign-of-radius → enum).
+  - **Server-authoritative setpoints** *vs client sends positions* → the client
+    asks, the sim flies; avoids client/server state divergence.
+  - **Loiter = tangent + reuse the HSA heading loop** *vs a separate orbit
+    integrator / L1 vector field* → one guidance primitive, two features;
+    pure-tangent holds the ring (start-on-ring), radius-capture is the noted
+    one-term extension.
+  - **Circular orbit** for CAP *vs a racetrack pattern* → the circle is the
+    minimal faithful loiter; racetrack (two straights + two 180° turns) is named
+    as the extension.
+  - Ack = **`accepted | rejected` + reason** *vs the full `MAV_RESULT` enum* →
+    covers feasible-vs-violates-a-limit; the enum is the trivial extension.
+  - Send seam: **module-singleton socket + `sendCommand()`** called by a cold-lane
+    panel *vs React Context / lifting the socket* → one link, one producer; keeps
+    the rAF hot path untouched.
+- **Done when:** send an HSA heading → the RQ-180 slews to it at its max turn rate
+  and holds; change speed/altitude → it ramps within limits; click Loiter → it
+  re-establishes a CAP orbit; an infeasible command (e.g. a radius below the min
+  turn radius) returns `rejected` with a reason.
+- **Commits:** `feat: command wire contract (command + commandAck)` ·
+  `feat: full-duplex /ws (sender + receiver)` ·
+  `feat: HSA + loiter guidance laws` · `feat: web command panel (first uplink)`
+
+### Phase 8 — Dockerize the autonomy computer
+
+- **Slice:** `apps/api/Dockerfile` (`python:3.12-slim`, non-root, `--reload`) and
+  a root `docker-compose.yml` that runs the api (bind-mounted so `--reload` sees
+  edits) with **web behind an opt-in profile** (host-run in dev for fast HMR).
+  Package the "autonomy computer" as a reproducible service.
+- **Seed question (you draft first):** *Why containerize the sim for a learning
+  app — what does Docker actually buy you here? A real GCS and its flight
+  controller are separate machines; should the autonomy computer be its **own
+  container** talking to FastAPI over a bus, or an **asyncio task inside**
+  FastAPI? Where is that "separation" already earned in the code?*
+- **Key decisions → alternative rejected:**
+  - **Single api container** (sim as an asyncio task in FastAPI) *vs a separate
+    autonomy container bridged over ZeroMQ/Redis* → the separation is already
+    earned at the `VehicleSim` class seam; a second container only adds an IPC bus
+    that teaches message-bussing, not autonomy. Split when: multiple vehicles, a
+    real SITL binary, or autonomy must survive an api restart.
+  - **Web on the host in dev** (api-only container; web behind a `full-container`
+    profile) *vs containerizing web too* → WSL2 bind-mount watching forces polling
+    (laggy HMR); host web reaches the published `:8000` with no code change.
+  - **Single-stage dev image** with bind mount + `--reload` *vs a multi-stage
+    baked-in build* → multi-stage is the documented prod path; in dev it fights
+    the reload loop.
+- **Done when:** `docker compose up` serves `/health` and streams telemetry; host
+  `npm run dev` connects and the RQ-180 flies + accepts commands exactly as
+  before; editing `apps/api/*.py` hot-reloads inside the container.
+- **Commits:** `chore: dockerfile for api (python 3.12-slim)` ·
+  `chore: docker-compose (api + optional web profile)`
