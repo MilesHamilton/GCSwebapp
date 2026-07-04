@@ -76,7 +76,9 @@ export function buildLayers(frame: RenderFrame) {
       visible: frame.visibility.aircraft,
       mesh: '/models/rq-180.obj',
       loaders: [OBJLoader],
-      getPosition: (d) => d.position,
+      // 3D: fly the mesh at its real altitude (z=altM) so terrain/buildings can occlude it
+      // under a pitched camera. Replay-sampled vehicles have no altM -> ground (0).
+      getPosition: (d): [number, number, number] => [d.position[0], d.position[1], d.altM ?? 0],
       getColor: (d) => (d.id === frame.selectedId ? AIRCRAFT_SELECTED : AIRCRAFT_COLOR),
       getOrientation: (d): [number, number, number] => [0, HEADING_OFFSET - d.headingDeg, 0],
       sizeScale: AIRCRAFT_SIZE_SCALE,

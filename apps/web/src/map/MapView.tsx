@@ -1,6 +1,6 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useEffect } from 'react'
-import { Map, useControl, useMap } from 'react-map-gl/mapbox'
+import { Map, Source, Layer, useControl, useMap } from 'react-map-gl/mapbox'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { useTrackStore, type TimedPoint, type Vehicle } from '../state/trackStore'
 import { usePlaybackStore } from '../state/playbackStore'
@@ -13,8 +13,8 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string
 const INITIAL_VIEW_STATE = {
   longitude: -77.0365,
   latitude: 38.8977,
-  zoom: 12,
-  pitch: 0,
+  zoom: 14,
+  pitch: 55, // pitched so terrain relief + 3D buildings read; flatten to go top-down
   bearing: 0,
 }
 
@@ -91,7 +91,10 @@ function resolveFrame(): RenderFrame {
 // imperatively (getState) and pushes freshly-built layers via setProps — all OFF React's
 // render cycle, so telemetry never triggers a component re-render.
 function DeckLayers() {
-  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: false }))
+  // interleaved: deck draws into Mapbox's GL context (shared depth buffer), so terrain +
+  // 3D buildings occlude deck layers under a pitched camera. Phase 1 shipped overlaid
+  // (deck always on top); 3D forces this revisit — the logged Phase 1 trigger.
+  const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({ interleaved: true }))
   const maps = useMap()
 
   useEffect(() => {
@@ -133,8 +136,36 @@ export default function MapView() {
       mapboxAccessToken={MAPBOX_TOKEN}
       initialViewState={INITIAL_VIEW_STATE}
       mapStyle="mapbox://styles/mapbox/dark-v11"
+      maxPitch={80}
+      terrain={{ source: 'mapbox-dem', exaggeration: 1.4 }}
       style={{ width: '100vw', height: '100vh' }}
     >
+      {/* DEM feeds the `terrain` prop above (relief) and the sky layer's horizon. */}
+      <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxzoom={14} />
+      <Layer
+        id="sky"
+        type="sky"
+        paint={{
+          'sky-type': 'atmosphere',
+          'sky-atmosphere-sun': [0.0, 90.0],
+          'sky-atmosphere-sun-intensity': 15,
+        }}
+      />
+      {/* 3D buildings extruded from the base style's composite source. */}
+      <Layer
+        id="3d-buildings"
+        source="composite"
+        source-layer="building"
+        type="fill-extrusion"
+        minzoom={14}
+        filter={['==', 'extrude', 'true']}
+        paint={{
+          'fill-extrusion-color': '#2a3040',
+          'fill-extrusion-height': ['get', 'height'],
+          'fill-extrusion-base': ['get', 'min_height'],
+          'fill-extrusion-opacity': 0.7,
+        }}
+      />
       <DeckLayers />
     </Map>
   )
