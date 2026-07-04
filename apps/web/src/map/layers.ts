@@ -27,8 +27,8 @@ const AIRCRAFT_SIZE_SCALE = 5
 const HEADING_OFFSET = 90
 
 const TRAIL_COLOR: Color = [57, 208, 255, 220]
-const ZONE_FILL: Color = [255, 80, 80, 40]
-const ZONE_LINE: Color = [255, 80, 80, 200]
+const ZONE_LINE: Color = [255, 80, 80, 220]
+const GEOZONE_HEIGHT_M = 2000 // extrude the zone into a floor->2 km airspace cage
 
 // TripsLayer stores timestamps as float32, which loses precision on raw epoch-ms
 // (~1.7e12). Normalize to a small base per frame so the trail renders cleanly.
@@ -47,19 +47,25 @@ export function buildLayers(frame: RenderFrame) {
       data: frame.geozones,
       visible: frame.visibility.geozones,
       getPolygon: (d) => d.polygon,
-      getFillColor: ZONE_FILL,
+      // A restricted area has vertical extent — render it as an extruded WIREFRAME cage
+      // (no filled walls). That reads as a 3D airspace volume with no translucent faces
+      // to occlude the craft or z-fight in interleaved mode (the earlier side effect).
+      extruded: true,
+      getElevation: GEOZONE_HEIGHT_M,
+      filled: false,
+      wireframe: true,
+      stroked: true,
       getLineColor: ZONE_LINE,
       getLineWidth: 2,
       lineWidthUnits: 'pixels',
-      stroked: true,
-      filled: true,
+      parameters: { depthWriteEnabled: false },
       pickable: true,
     }),
     new TripsLayer<Trail>({
       id: 'trails',
       data: trails,
       visible: frame.visibility.trail,
-      getPath: (t) => t.points.map((p) => p.coordinates),
+      getPath: (t) => t.points.map((p): [number, number, number] => [p.coordinates[0], p.coordinates[1], p.altM]),
       getTimestamps: (t) => t.points.map((p) => p.timestamp - base),
       getColor: TRAIL_COLOR,
       getWidth: 2,

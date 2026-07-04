@@ -36,12 +36,19 @@ function sampleAt(id: string, points: TimedPoint[], t: number): Vehicle | null {
       id,
       position: first.coordinates,
       headingDeg: next ? bearing(first.coordinates, next.coordinates) : 0,
+      altM: first.altM,
       updatedAt: first.timestamp,
     }
   }
   if (t >= last.timestamp) {
     const prev = points[points.length - 2] ?? last
-    return { id, position: last.coordinates, headingDeg: bearing(prev.coordinates, last.coordinates), updatedAt: last.timestamp }
+    return {
+      id,
+      position: last.coordinates,
+      headingDeg: bearing(prev.coordinates, last.coordinates),
+      altM: last.altM,
+      updatedAt: last.timestamp,
+    }
   }
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i]
@@ -53,10 +60,10 @@ function sampleAt(id: string, points: TimedPoint[], t: number): Vehicle | null {
         a.coordinates[0] + (b.coordinates[0] - a.coordinates[0]) * f,
         a.coordinates[1] + (b.coordinates[1] - a.coordinates[1]) * f,
       ]
-      return { id, position, headingDeg: bearing(a.coordinates, b.coordinates), updatedAt: t }
+      return { id, position, headingDeg: bearing(a.coordinates, b.coordinates), altM: a.altM + (b.altM - a.altM) * f, updatedAt: t }
     }
   }
-  return { id, position: last.coordinates, headingDeg: 0, updatedAt: last.timestamp }
+  return { id, position: last.coordinates, headingDeg: 0, altM: last.altM, updatedAt: last.timestamp }
 }
 
 // Resolve the frame to draw from the stores, imperatively (no React subscription).
