@@ -1,29 +1,14 @@
 import { useState } from 'react'
 import { sendCommand } from '../ws/client'
 import { useCommandStore } from '../state/commandStore'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-// The app's first cold-lane UI: an operator command panel. Interaction is human-speed,
-// so ordinary React state + re-renders are fine here — this is OFF the telemetry hot path.
-
-const panel: React.CSSProperties = {
-  position: 'absolute',
-  top: 12,
-  left: 12,
-  zIndex: 10,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-  width: 180,
-  padding: 12,
-  background: 'rgba(17,24,39,0.85)',
-  color: '#f3f4f6',
-  font: '13px system-ui, sans-serif',
-  borderRadius: 8,
-}
-const input: React.CSSProperties = { padding: '4px 6px', background: '#111827', color: '#f3f4f6', border: '1px solid #374151', borderRadius: 4 }
-const button: React.CSSProperties = { padding: '5px 8px', background: '#2563eb', color: '#fff', border: 0, borderRadius: 4, cursor: 'pointer' }
-const label: React.CSSProperties = { fontWeight: 600, opacity: 0.8 }
-
+// The app's first cold-lane UI: an operator command panel, on shadcn/ui. Interaction is
+// human-speed, so ordinary React state + re-renders are fine here — OFF the telemetry hot path.
 export default function CommandPanel() {
   const [heading, setHeading] = useState('')
   const [speed, setSpeed] = useState('')
@@ -40,30 +25,51 @@ export default function CommandPanel() {
     return Number.isFinite(n) ? n : undefined
   }
 
-  const sendHsa = () => sendCommand({ kind: 'hsa', headingDeg: num(heading), speedMps: num(speed), altM: num(altitude) })
+  const sendHsa = () =>
+    sendCommand({ kind: 'hsa', headingDeg: num(heading), speedMps: num(speed), altM: num(altitude) })
   const sendLoiter = () => sendCommand({ kind: 'loiter', radiusM: num(radius), direction })
 
   return (
-    <div style={panel}>
-      <div style={label}>HSA — heading / speed / alt</div>
-      <input type="number" style={input} placeholder="heading °" value={heading} onChange={(e) => setHeading(e.target.value)} />
-      <input type="number" style={input} placeholder="speed m/s (30–60)" value={speed} onChange={(e) => setSpeed(e.target.value)} />
-      <input type="number" style={input} placeholder="altitude m" value={altitude} onChange={(e) => setAltitude(e.target.value)} />
-      <button style={button} onClick={sendHsa}>Send HSA</button>
-
-      <div style={{ ...label, marginTop: 6 }}>Loiter (CAP) — here</div>
-      <input type="number" style={input} placeholder="radius m (≥ ~386)" value={radius} onChange={(e) => setRadius(e.target.value)} />
-      <select style={input} value={direction} onChange={(e) => setDirection(e.target.value as 'cw' | 'ccw')}>
-        <option value="ccw">CCW</option>
-        <option value="cw">CW</option>
-      </select>
-      <button style={button} onClick={sendLoiter}>Loiter here</button>
-
-      {lastAck && (
-        <div style={{ marginTop: 6, color: lastAck.accepted ? '#4ade80' : '#f87171' }}>
-          {lastAck.accepted ? '✓ accepted' : `✗ rejected: ${lastAck.reason}`}
+    <Card className="absolute top-3 left-3 z-10 w-56 gap-3 py-3">
+      <CardHeader className="px-3">
+        <CardTitle className="text-sm">Command</CardTitle>
+      </CardHeader>
+      <CardContent className="gap-4 px-3">
+        <div className="flex flex-col gap-2">
+          <Label className="text-muted-foreground text-xs">HSA — heading / speed / alt</Label>
+          <Input type="number" placeholder="heading °" value={heading} onChange={(e) => setHeading(e.target.value)} />
+          <Input type="number" placeholder="speed m/s (30–60)" value={speed} onChange={(e) => setSpeed(e.target.value)} />
+          <Input type="number" placeholder="altitude m" value={altitude} onChange={(e) => setAltitude(e.target.value)} />
+          <Button size="sm" onClick={sendHsa}>
+            Send HSA
+          </Button>
         </div>
-      )}
-    </div>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-muted-foreground text-xs">Loiter (CAP) — here</Label>
+          <Input type="number" placeholder="radius m (≥ ~386)" value={radius} onChange={(e) => setRadius(e.target.value)} />
+          <select
+            value={direction}
+            onChange={(e) => setDirection(e.target.value as 'cw' | 'ccw')}
+            className="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px]"
+          >
+            <option value="ccw">CCW</option>
+            <option value="cw">CW</option>
+          </select>
+          <Button size="sm" onClick={sendLoiter}>
+            Loiter here
+          </Button>
+        </div>
+
+        {lastAck && (
+          <Badge
+            variant={lastAck.accepted ? 'secondary' : 'destructive'}
+            className="w-full justify-start whitespace-normal"
+          >
+            {lastAck.accepted ? '✓ accepted' : `✗ rejected: ${lastAck.reason}`}
+          </Badge>
+        )}
+      </CardContent>
+    </Card>
   )
 }
