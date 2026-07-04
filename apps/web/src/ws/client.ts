@@ -1,9 +1,14 @@
 import { useTrackStore, type TelemetrySample } from '../state/trackStore'
-import type { ServerMessage, VehicleState } from './types'
+import { useCommandStore } from '../state/commandStore'
+import type { Command, CommandMsg, ServerMessage, VehicleState } from './types'
 
 const WS_URL = 'ws://localhost:8000/ws'
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 5000
+
+// The single live socket, exposed to the command sender. There's one datalink, so a
+// module singleton mirrors that — no Context/provider needed for one producer.
+let activeSocket: WebSocket | null = null
 
 // Normalize rich wire vehicle state -> the lean store sample (wire shape != store shape).
 function toSample(v: VehicleState, ts: number): TelemetrySample {
@@ -26,10 +31,24 @@ function handle(msg: ServerMessage): void {
       store.setGeozones(msg.geozones)
       msg.vehicles.forEach((v) => store.ingest(toSample(v, msg.ts)))
       break
+    case 'commandAck':
+      useCommandStore.getState().setAck(msg)
+      break
     // mission -> cold lane (Phase 5), event -> alerts, replay -> Phase 4
     default:
       break
   }
+}
+
+// Send an uplink command — the app's first client->server traffic. No-op (with a warn)
+// if the socket isn't open. The server validates it and replies with a `commandAck`.
+export function sendCommand(command: Command): void {
+  if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+    console.warn('[ws] cannot send command; socket not open')
+    return
+  }
+  const msg: CommandMsg = { type: 'command', ts: Date.now(), commandId: crypto.randomUUID(), command }
+  activeSocket.send(JSON.stringify(msg))
 }
 
 // Connects to the telemetry socket and feeds the track store. Reconnects with
@@ -46,6 +65,7 @@ export function startWsClient(url = WS_URL): () => void {
 
     socket.onopen = () => {
       backoff = BACKOFF_MIN_MS
+      activeSocket = socket
       console.info('[ws] connected', url)
     }
 
@@ -58,6 +78,7 @@ export function startWsClient(url = WS_URL): () => void {
     }
 
     socket.onclose = () => {
+      if (socket === activeSocket) activeSocket = null
       if (stopped) return
       console.warn(`[ws] disconnected; retrying in ${backoff}ms`)
       retry = setTimeout(connect, backoff)
