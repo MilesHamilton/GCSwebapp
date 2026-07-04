@@ -84,15 +84,17 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
 | # | Feature (one slice) | Key decisions → *alternative rejected* | Done when |
 |---|---|---|---|
 | **0** | Scaffold + learning rig | plain folders *vs pnpm workspace* | web boots blank page · api returns `/health` · first commit · `notes/` exist |
-| **1** | Static map shell | interleaved *vs overlaid* · `MapboxOverlay` *vs `<DeckGL>` component* | map renders · aircraft icon at fixed coord · one geozone polygon · no console errors |
+| **1** | Static map shell · **+3D (revisit)** | interleaved *vs overlaid* · `MapboxOverlay` *vs `<DeckGL>` component* · 3D: overlaid→interleaved for occlusion | map renders · aircraft icon at fixed coord · one geozone polygon · no console errors · *(3D: terrain + buildings + pitch)* |
 | **2** | Track store + layer factory + fake driver | Zustand *vs Context/module* · **TripsLayer *vs PathLayer*** · imperative loop *vs declarative re-render* · 10 Hz cadence | aircraft flies a circle · yaw + trail update · UI chrome doesn't re-render per tick |
 | **3** | WebSocket transport + telemetry contract | 5 message types *vs one blob* · snapshot-on-connect · reconnect/backoff · validate at boundary | timer removed, backend drives it · refresh mid-flight → snapshot restores · drop server → reconnects |
-| **4** | Replay | `TimedPoint` reused live+replay · live *vs replay* mode · where the clock lives | record a flight · scrub the timeline · trail animates to cursor |
-| **5** | Operator HUD + camera sync | camera imperative `flyTo` *vs declarative `viewState`* · selection in cold lane | click aircraft → card fills · toggle geozone · follow → camera tracks |
+| **4** | Replay · **+shadcn timeline** | `TimedPoint` reused live+replay · live *vs replay* mode · where the clock lives · shadcn timeline *vs raw range* | record a flight · scrub the timeline · trail animates to cursor |
+| **5** | Operator HUD + camera sync · **+shadcn telemetry panel** | camera imperative `flyTo` *vs declarative `viewState`* · selection in cold lane · live panel: sampled read *vs per-tick subscribe* | click aircraft → card fills · toggle geozone · follow → camera tracks · live telemetry panel updates |
 | | **▸ Milestone 2 — fake flight autonomy computer** | | |
 | **6** | Stateful flight model (autonomy core) | stateful `step(dt)` *vs closed-form `f(t)`* · 3-DOF point-mass *vs 6-DOF* · one shared sim *vs per-connection* | circle now *emerges* from an integrated loiter law · sim is one shared stateful object · frontend untouched |
 | **7** | Command uplink (HSA + loiter/CAP) | command on existing `/ws` *vs REST / 2nd socket* · typed union *vs MAVLink `COMMAND_LONG`* · loiter = tangent reusing the HSA heading loop *vs a separate orbit integrator* | send HSA → aircraft slews & holds · loiter → CAP orbit · infeasible cmd → rejected + reason |
 | **8** | Dockerize the autonomy computer | single api container *vs separate autonomy container over a bus* · web on host *vs containerized (WSL2 HMR)* | `docker compose up` → api streams · host web flies & commands · edit `.py` → hot reload |
+| | **▸ Milestone 3 — 3D & shadcn UI polish** *(also amends Phases 1 · 4 · 5)* | | |
+| **9** | UI foundation (Tailwind + shadcn/ui) | shadcn copy-in *vs packaged lib (MUI)* · Tailwind *vs CSS modules* · **prereq for 4 & 5's shadcn UI** | tailwind builds · a shadcn component renders · `CommandPanel` re-skinned · hot path untouched |
 
 ---
 
@@ -130,6 +132,26 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
 - **Done when:** map renders, aircraft icon sits at a fixed lng/lat, one polygon
   is drawn, browser console is clean.
 - **Commits:** `feat: static map shell (mapbox + deck overlay + icon + geozone)`
+- **▸ Added 2026-07-04 — 3D map upgrade (revisit of a built phase):** make the
+  basemap 3D — a `raster-dem` terrain source + `map.setTerrain` (exaggeration), a
+  `sky` layer, `fill-extrusion` 3D buildings, and a pitched camera. The RQ-180 now
+  flies at its real `altM` (commandable since Phase 7), so depth matters.
+  - **Seed question (you draft first):** *You chose **overlaid** deck rendering in
+    Phase 1 for simplicity. What breaks visually once there's 3D terrain/buildings
+    and a pitched camera — and why does correct **occlusion** push you toward
+    **interleaved** rendering? What does interleaved cost?*
+  - **Key decisions → alternative rejected:**
+    - Overlaid → **interleaved** deck rendering *vs staying overlaid* → interleaved
+      lets terrain/buildings occlude deck layers under pitch; overlaid always paints
+      deck on top (the jet is never hidden behind a hill). Interleaved has
+      layer-support + z-order caveats — this is the **logged revisit** of Phase 1's
+      original overlaid choice.
+    - 3D terrain + buildings + sky *vs flat 2D* → depth realism now that altitude is
+      real; costs GPU + camera state.
+    - Fly the mesh at `altM` *vs ground-clamped* → altitude becomes visible.
+  - **Done when:** terrain relief + 3D buildings render, the camera pitches, the
+    RQ-180 sits at its `altM`, and deck layers occlude correctly behind terrain.
+  - **Commits:** `feat: 3d terrain + sky + buildings` · `refactor: deck overlaid → interleaved`
 
 ### Phase 2 — Track store + layer factory + fake driver
 
@@ -194,6 +216,12 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
   the aircraft + trail animate to the cursor position.
 - **Commits:** `feat: telemetry recorder` · `feat: playback clock` ·
   `feat: replay scrubber UI`
+- **▸ Added 2026-07-04 — shadcn timeline/scrubber (needs Phase 9):** build the
+  scrubber as a **shadcn**-based timeline rather than a raw `<input type=range>`.
+  - **Key decision → alternative rejected:** shadcn timeline (a community component,
+    or built from shadcn `Slider` + primitives — there's no official timeline)
+    *vs a bare range input* → a consistent design system + richer ticks/markers, at
+    the cost of the Phase 9 setup and a non-core component. **Depends on Phase 9.**
 
 ### Phase 5 — Operator HUD + camera sync
 
@@ -212,6 +240,16 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
   hides/shows the polygon; enabling follow keeps the camera tracking the aircraft.
 - **Commits:** `feat: HUD vehicle card + conn status` ·
   `feat: camera follow/sync` · `feat: layer visibility toggles`
+- **▸ Added 2026-07-04 — shadcn live telemetry panel (needs Phase 9):** a real-time
+  readout (position, `altM`, heading, speed, mode, battery) for the selected
+  vehicle, built from shadcn cards / badges / stat rows.
+  - **Seed question (you draft first):** *Telemetry lives in the **hot lane**, off
+    React. How do you show it **live** in a React panel without re-rendering at
+    10 Hz — i.e., without breaking the two-lane rule?*
+  - **Key decision → alternative rejected:** **sample the hot store at human-refresh
+    rate** (a ~4–10 Hz interval / rAF-throttled read of `getState()`) *vs
+    subscribing React to every telemetry tick* → keeps the hot path off React's
+    render cycle; a naive subscription re-renders the panel 10×/s. **Depends on Phase 9.**
 
 ---
 
@@ -366,3 +404,37 @@ swappable constants, stored in SI to match the wire contract:
   before; editing `apps/api/*.py` hot-reloads inside the container.
 - **Commits:** `chore: dockerfile for api (python 3.12-slim)` ·
   `chore: docker-compose (api + optional web profile)`
+
+---
+
+## Milestone 3 — 3D & shadcn UI polish
+
+A visual/UX layer on top of the working autonomy stack. Three of the four additions
+**amend already-scoped phases** — 3D folds into **Phase 1**, the shadcn timeline into
+**Phase 4**, the live telemetry panel into **Phase 5** — and one is a new
+**foundation** phase they all lean on.
+
+> **Build-order note:** do **Phase 9 first** — the shadcn parts of Phases 4 & 5
+> depend on it. (3D in Phase 1 is independent of shadcn and can go anytime.)
+
+### Phase 9 — UI foundation (Tailwind + shadcn/ui)
+
+- **Slice:** install + configure **Tailwind CSS**, init **shadcn/ui**
+  (`components.json`, base tokens, the `cn` helper), wire it into the Vite app, and
+  migrate the existing inline-styled `CommandPanel` to shadcn as the proving ground.
+  Pure foundation — no new features. **Prerequisite for the shadcn UI in Phases 4 & 5.**
+- **Seed question (you draft first):** *Why adopt Tailwind + shadcn now instead of
+  continuing with inline styles? shadcn "components" are **copied into your repo**,
+  not installed as a dependency — what does that buy vs a packaged library? And how
+  does this stay off the telemetry hot path?*
+- **Key decisions → alternative rejected:**
+  - **shadcn/ui** (copy-in components on Radix + Tailwind) *vs a packaged lib
+    (MUI/Chakra)* → you own and restyle the code with no runtime lock-in; heavier
+    than inline styles and adds a build-time layer.
+  - **Tailwind** *vs CSS modules / styled-components* → utility classes + the shadcn
+    ecosystem; costs a build step and class churn.
+  - Migrate `CommandPanel` as the pilot *vs a greenfield component* → proves the
+    setup on real UI before Phases 4 & 5 depend on it.
+- **Done when:** Tailwind builds, a shadcn `Button`/`Input` renders, `CommandPanel`
+  is re-skinned with shadcn, `tsc`/build is clean, and the rAF hot path is untouched.
+- **Commits:** `chore: tailwind + shadcn/ui init` · `refactor: command panel → shadcn`
