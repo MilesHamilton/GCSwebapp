@@ -1,0 +1,29 @@
+# One command to run the autonomy computer: `docker compose up` -> api on :8000.
+# The web dev server runs on the HOST by default (`npm --prefix apps/web run dev`) —
+# WSL2 bind-mount file-watching is slow, so host HMR is far snappier. The browser
+# reaches the containerized api at ws://localhost:8000/ws with no code change.
+services:
+  api:
+    build: ./apps/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app # live edits -> uvicorn --reload picks them up
+      - /app/.venv # anonymous volume: don't let the host .venv shadow the image's deps
+
+  # Opt-in containerized web (mainly for a clone-and-run demo, not day-to-day dev):
+  #   docker compose --profile full-container up
+  web:
+    profiles: ["full-container"]
+    image: node:22-slim
+    working_dir: /app
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules # keep the container's node_modules, don't mask with the host's
+    env_file:
+      - ./apps/web/.env # VITE_MAPBOX_TOKEN (public pk. token)
+    environment:
+      - CHOKIDAR_USEPOLLING=true # WSL2/Docker file-watch fallback for Vite HMR
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
