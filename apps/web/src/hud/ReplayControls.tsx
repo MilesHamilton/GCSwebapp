@@ -62,13 +62,21 @@ export default function ReplayControls() {
     const b = recordingBounds(useTrackStore.getState().recording)
     const pb = usePlaybackStore.getState()
     pb.setBounds(b)
-    pb.setMode('replay')
-    if (b) pb.setCurrentTime(b[0])
+    // Only enter replay if there's a usable recording; otherwise stay live (no dead state).
+    if (b) {
+      pb.setMode('replay')
+      pb.setCurrentTime(b[0])
+    }
   }
   const togglePlay = () => {
     const pb = usePlaybackStore.getState()
-    if (pb.playing) pb.pause()
-    else pb.play()
+    if (pb.playing) {
+      pb.pause()
+      return
+    }
+    // Play-from-end restarts: rewind to the start rather than sitting frozen at the end.
+    if (pb.bounds && pb.currentTime >= pb.bounds[1]) pb.setCurrentTime(pb.bounds[0])
+    pb.play()
   }
 
   const elapsed = bounds ? Math.max(0, currentTime - bounds[0]) : 0
