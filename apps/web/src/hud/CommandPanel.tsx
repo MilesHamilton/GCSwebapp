@@ -24,8 +24,11 @@ export default function CommandPanel() {
   // Commands target the SELECTED vehicle (map click or the panel selector). No selection
   // -> omit vehicleId so the server default ('uav-01') still works. The ack is read for
   // that same vehicle, so a fleet's acks don't clobber each other.
+  const [broadcast, setBroadcast] = useState(false)
   const selectedId = useUiStore((s) => s.selectedVehicleId)
-  const target = selectedId ?? undefined
+  // Broadcast ("All") sends one command with vehicleId "*"; the gateway fans it to every
+  // producer (each acks with its own id). Otherwise target the selected vehicle.
+  const target = broadcast ? '*' : (selectedId ?? undefined)
   const lastAck = useCommandStore((s) => (selectedId ? s.acks[selectedId] : undefined))
   // Live roster for the selector. Shallow-compare the id LIST so this re-renders only when
   // a vehicle joins/leaves — not on every 10 Hz telemetry tick (keeps the hot path off React).
@@ -57,7 +60,7 @@ export default function CommandPanel() {
   return (
     <Card className="absolute top-3 left-3 z-10 w-56 gap-3 py-3">
       <CardHeader className="px-3">
-        <CardTitle className="text-sm">Command → {selectedId ?? 'uav-01 (default)'}</CardTitle>
+        <CardTitle className="text-sm">Command → {broadcast ? 'ALL' : (selectedId ?? 'uav-01 (default)')}</CardTitle>
       </CardHeader>
       <CardContent className="gap-4 px-3">
         <div className="flex flex-col gap-1">
@@ -68,12 +71,20 @@ export default function CommandPanel() {
               <Button
                 key={id}
                 size="sm"
-                variant={selectedId === id ? 'default' : 'outline'}
-                onClick={() => useUiStore.getState().setSelected(id)}
+                variant={!broadcast && selectedId === id ? 'default' : 'outline'}
+                onClick={() => {
+                  setBroadcast(false)
+                  useUiStore.getState().setSelected(id)
+                }}
               >
                 {id}
               </Button>
             ))}
+            {vehicleIds.length > 1 && (
+              <Button size="sm" variant={broadcast ? 'default' : 'outline'} onClick={() => setBroadcast(true)}>
+                All
+              </Button>
+            )}
           </div>
         </div>
 

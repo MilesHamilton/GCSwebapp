@@ -169,6 +169,12 @@ async def ws(websocket: WebSocket) -> None:
                 except ValidationError:
                     out.put_control(CommandAckMsg(ts=_now_ms(), commandId="", accepted=False, reason="invalid command").model_dump_json())
                     continue
+                if msg.vehicleId == "*":  # broadcast: fan to every producer; each acks with its own id
+                    if not producers:
+                        out.put_control(CommandAckMsg(ts=_now_ms(), vehicleId="*", commandId=msg.commandId, accepted=False, reason="no vehicles connected").model_dump_json())
+                    for pq in list(producers.values()):
+                        pq.put_nowait(raw)
+                    continue
                 pq = producers.get(msg.vehicleId)
                 if pq is None:
                     # The gateway holds the registry, so only it can answer "no such vehicle".
