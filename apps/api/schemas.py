@@ -114,7 +114,18 @@ class LoiterCommand(BaseModel):
     altM: float | None = None
 
 
-Command = Annotated[Union[HsaCommand, LoiterCommand], Field(discriminator="kind")]
+class RacetrackCommand(BaseModel):
+    kind: Literal["racetrack"] = "racetrack"
+    semiMajorM: float  # half the overall LENGTH of the racetrack
+    semiMinorM: float  # half the overall WIDTH == the 180deg turn radius
+    centerLng: float | None = None  # None = about the current position
+    centerLat: float | None = None
+    bearingDeg: float | None = None  # long-axis heading; None = current heading
+    direction: Literal["cw", "ccw"] | None = None
+    altM: float | None = None
+
+
+Command = Annotated[Union[HsaCommand, LoiterCommand, RacetrackCommand], Field(discriminator="kind")]
 
 
 class CommandMsg(BaseModel):

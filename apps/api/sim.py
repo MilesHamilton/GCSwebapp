@@ -17,14 +17,24 @@ import time
 from schemas import Attitude, Command, Geozone, Position, SnapshotMsg, Status, TelemetryMsg, VehicleState, Velocity
 from vehicle import G, RQ_180, VehicleCharacteristics
 
-CENTER_LNG = -77.0365
-CENTER_LAT = 38.8977
 M_PER_DEG_LAT = 111_320.0
-RADIUS_DEG = 0.02  # ~2.2 km, unchanged from the Phase 2 circle
+
+# Ronald Reagan Washington National (KDCA), runway 1/19 (main runway) — published
+# threshold positions (AirNav). The vehicle starts on RWY 01; the loiter + geozone
+# are centred on the airport.
+RWY01_LNG, RWY01_LAT = -77.0374485, 38.8415817  # RWY 01 threshold (south end)
+RWY19_LNG, RWY19_LAT = -77.0388737, 38.8611926  # RWY 19 threshold (north end)
+RWY_BEARING_DEG = 357.0  # RWY 01 departure heading (true), ~due north
+CENTER_LNG = (RWY01_LNG + RWY19_LNG) / 2.0  # runway midpoint = loiter center
+CENTER_LAT = (RWY01_LAT + RWY19_LAT) / 2.0
+
+RADIUS_DEG = 0.02  # ~2.2 km loiter ring
 LOITER_RADIUS_M = RADIUS_DEG * M_PER_DEG_LAT
 CRUISE_ALT_M = 500.0
-LOITER_DIR = -1  # -1 = CCW (matches the old circle's direction), +1 = CW
+LOITER_DIR = -1  # -1 = CCW, +1 = CW
 K_RADIUS = 1.0  # radius-capture gain: how hard we steer back onto the ring
+RACETRACK_SEG_M = 25.0  # racetrack polyline resolution
+RACETRACK_LOOKAHEAD_M = 120.0  # pure-pursuit carrot distance ahead on the path
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -43,35 +53,73 @@ def _offsets_m(lat1: float, lng1: float, lat2: float, lng2: float) -> tuple[floa
     return north, east
 
 
+def _local_to_lnglat(clat: float, clng: float, east_m: float, north_m: float) -> list[float]:
+    lat = clat + north_m / M_PER_DEG_LAT
+    lng = clng + east_m / (M_PER_DEG_LAT * math.cos(math.radians(clat)))
+    return [lng, lat]
+
+
+def _build_racetrack_path(
+    clat: float, clng: float, semi_major: float, semi_minor: float, bearing_deg: float, direction: str
+) -> list[list[float]]:
+    """Stadium/racetrack as a closed [lng,lat] polyline: two straight legs joined by two
+    180deg turns. semi_minor = turn radius; leg length L = 2*(semi_major - semi_minor)."""
+    r = semi_minor
+    leg = max(0.0, 2.0 * (semi_major - semi_minor))
+    br = math.radians(bearing_deg)
+    ue, un = math.sin(br), math.cos(br)  # unit vector along the long axis (east, north)
+    we, wn = math.cos(br), -math.sin(br)  # unit vector to its right
+
+    def uw(pu: float, pw: float) -> list[float]:  # local (along, right) metres -> [lng,lat]
+        return _local_to_lnglat(clat, clng, pu * ue + pw * we, pu * un + pw * wn)
+
+    half = leg / 2.0
+    n_leg = max(1, int(leg / RACETRACK_SEG_M))
+    n_arc = max(4, int(math.pi * r / RACETRACK_SEG_M))
+    pts: list[list[float]] = []
+    for i in range(n_leg):  # leg 1: right side, back -> front
+        pts.append(uw(-half + leg * i / n_leg, r))
+    for i in range(n_arc):  # turn 1 at +half: (0,+r) -> bulge +u -> (0,-r)
+        phi = math.pi * i / n_arc
+        pts.append(uw(half + r * math.sin(phi), r * math.cos(phi)))
+    for i in range(n_leg):  # leg 2: left side, front -> back
+        pts.append(uw(half - leg * i / n_leg, -r))
+    for i in range(n_arc):  # turn 2 at -half: (0,-r) -> bulge -u -> (0,+r)
+        phi = math.pi * i / n_arc
+        pts.append(uw(-half - r * math.sin(phi), -r * math.cos(phi)))
+    if direction == "cw":
+        pts.reverse()
+    return pts
+
+
 class VehicleSim:
     """A single point-mass aircraft flying a loiter, integrated at a fixed timestep."""
 
     def __init__(self, vehicle_id: str = "uav-01", veh: VehicleCharacteristics = RQ_180) -> None:
         self.vehicle_id = vehicle_id
         self.veh = veh
-        # --- integrated state ---
-        self.lat = CENTER_LAT
-        # start ON the ring, due east of center, so the initial track matches the old circle
-        self.lng = CENTER_LNG + RADIUS_DEG / math.cos(math.radians(CENTER_LAT))
+        # --- integrated state --- start on DCA RWY 01, heading down the runway; the
+        # default loiter then captures it into an orbit around the airport (midpoint).
+        self.lat = RWY01_LAT
+        self.lng = RWY01_LNG
         self.alt_m = CRUISE_ALT_M
-        self.heading_deg = 0.0  # compass heading (0=N, 90=E); set to the tangent below
+        self.heading_deg = RWY_BEARING_DEG  # compass heading (0=N, 90=E)
         self.speed_mps = veh.cruise_speed_mps
         self.roll_deg = 0.0  # derived each step, for display
         self.battery_pct = 100.0
-        # --- loiter setpoints ---
+        # --- loiter setpoints (default guidance: orbit the airport) ---
         self.mode = "LOITER"
         self.loiter_lat = CENTER_LAT
         self.loiter_lng = CENTER_LNG
         self.loiter_radius_m = LOITER_RADIUS_M
         self.loiter_dir = LOITER_DIR
         self.pitch_deg = 0.0  # derived from vertical speed, for display
-        # Face the loiter tangent for whichever direction we start in, so CW and CCW
-        # both capture the ring immediately instead of slewing ~180deg to reverse.
-        self.heading_deg = self._loiter_heading()
         # --- HSA setpoints (tracked when mode == "HSA") ---
         self.tgt_heading_deg = self.heading_deg
         self.tgt_speed_mps = self.speed_mps
         self.tgt_alt_m = self.alt_m
+        # --- racetrack path, [lng,lat] polyline (built when a racetrack command lands) ---
+        self.rt_path: list[list[float]] = []
 
     # ---- command intake: validate against the envelope, then set mode + setpoints ----
     def apply(self, command: Command) -> tuple[bool, str | None]:
@@ -90,6 +138,25 @@ class VehicleSim:
             self.tgt_heading_deg = command.headingDeg % 360.0 if command.headingDeg is not None else self.heading_deg
             if command.speedMps is not None:
                 self.tgt_speed_mps = command.speedMps
+            if command.altM is not None:
+                self.tgt_alt_m = command.altM
+            return True, None
+
+        if command.kind == "racetrack":
+            r = command.semiMinorM  # turn radius
+            r_min = self.tgt_speed_mps**2 / (G * math.tan(math.radians(self.veh.max_bank_deg)))
+            if r < r_min:
+                return False, f"turn radius (semi-minor) {r:.0f} m < min {r_min:.0f} m at {self.tgt_speed_mps:.0f} m/s"
+            if command.semiMajorM < r:
+                return False, f"semi-major {command.semiMajorM:.0f} m < semi-minor {r:.0f} m (need semi-major >= semi-minor)"
+            if command.altM is not None and not (0.0 <= command.altM <= self.veh.service_ceiling_m):
+                return False, f"altitude {command.altM:.0f} outside [0, {self.veh.service_ceiling_m:.0f}] m"
+            center_lat = command.centerLat if command.centerLat is not None else self.lat
+            center_lng = command.centerLng if command.centerLng is not None else self.lng
+            bearing = command.bearingDeg if command.bearingDeg is not None else self.heading_deg
+            direction = command.direction if command.direction is not None else ("cw" if self.loiter_dir == 1 else "ccw")
+            self.mode = "RACETRACK"
+            self.rt_path = _build_racetrack_path(center_lat, center_lng, command.semiMajorM, r, bearing, direction)
             if command.altM is not None:
                 self.tgt_alt_m = command.altM
             return True, None
@@ -127,9 +194,27 @@ class VehicleSim:
     def _guidance_heading(self) -> float:
         """Both modes drive the SAME heading controller; only the setpoint source differs.
         HSA holds a fixed commanded heading; LOITER regenerates it each tick (the tangent)."""
+        if self.mode == "RACETRACK":
+            return self._racetrack_heading()
         if self.mode == "LOITER":
             return self._loiter_heading()
         return self.tgt_heading_deg
+
+    def _racetrack_heading(self) -> float:
+        """Pure-pursuit path follower: steer toward a carrot point a fixed lookahead ahead
+        of the nearest point on the racetrack polyline (reuses the heading loop like loiter)."""
+        path = self.rt_path
+        if len(path) < 2:
+            return self.heading_deg
+        best_i, best_d = 0, math.inf
+        for i, p in enumerate(path):
+            d = (p[0] - self.lng) ** 2 + (p[1] - self.lat) ** 2
+            if d < best_d:
+                best_d, best_i = d, i
+        lookahead = max(1, round(RACETRACK_LOOKAHEAD_M / RACETRACK_SEG_M))
+        carrot = path[(best_i + lookahead) % len(path)]
+        north, east = _offsets_m(self.lat, self.lng, carrot[1], carrot[0])
+        return math.degrees(math.atan2(east, north)) % 360.0
 
     def _loiter_heading(self) -> float:
         """Steer along the circle's tangent, plus a term that captures the ring radius."""
@@ -194,13 +279,13 @@ class VehicleSim:
 # otherwise miss — they aren't in the telemetry stream.
 GEOZONES = [
     Geozone(
-        name="R-1 Restricted",
+        name="R-1 DCA",
         polygon=[
-            (-77.075, 38.875),
-            (-77.0, 38.875),
-            (-77.0, 38.92),
-            (-77.075, 38.92),
-            (-77.075, 38.875),
+            (-77.045, 38.840),
+            (-77.021, 38.840),
+            (-77.021, 38.862),
+            (-77.045, 38.862),
+            (-77.045, 38.840),
         ],
     ),
 ]

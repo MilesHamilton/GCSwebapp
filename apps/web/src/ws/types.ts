@@ -48,5 +48,15 @@ export type LoiterCommand = {
   direction?: 'cw' | 'ccw' | null
   altM?: number | null
 }
-export type Command = HsaCommand | LoiterCommand
+export type RacetrackCommand = {
+  kind: 'racetrack'
+  semiMajorM: number
+  semiMinorM: number
+  centerLng?: number | null
+  centerLat?: number | null
+  bearingDeg?: number | null
+  direction?: 'cw' | 'ccw' | null
+  altM?: number | null
+}
+export type Command = HsaCommand | LoiterCommand | RacetrackCommand
 export type CommandMsg = { type: 'command'; ts: number; vehicleId?: string; commandId: string; command: Command }

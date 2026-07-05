@@ -15,6 +15,9 @@ export default function CommandPanel() {
   const [altitude, setAltitude] = useState('')
   const [radius, setRadius] = useState('2226')
   const [direction, setDirection] = useState<'cw' | 'ccw'>('ccw')
+  const [semiMajor, setSemiMajor] = useState('3000')
+  const [semiMinor, setSemiMinor] = useState('600')
+  const [bearing, setBearing] = useState('')
   const lastAck = useCommandStore((s) => s.lastAck)
 
   // Empty OR non-numeric -> undefined, so a blank/typo cleanly means "leave unchanged"
@@ -28,6 +31,14 @@ export default function CommandPanel() {
   const sendHsa = () =>
     sendCommand({ kind: 'hsa', headingDeg: num(heading), speedMps: num(speed), altM: num(altitude) })
   const sendLoiter = () => sendCommand({ kind: 'loiter', radiusM: num(radius), direction })
+  const sendRacetrack = () =>
+    sendCommand({
+      kind: 'racetrack',
+      semiMajorM: num(semiMajor) ?? 0,
+      semiMinorM: num(semiMinor) ?? 0,
+      bearingDeg: num(bearing),
+      direction,
+    })
 
   return (
     <Card className="absolute top-3 left-3 z-10 w-56 gap-3 py-3">
@@ -58,6 +69,16 @@ export default function CommandPanel() {
           </select>
           <Button size="sm" onClick={sendLoiter}>
             Loiter here
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-muted-foreground text-xs">Racetrack — semi-major / semi-minor</Label>
+          <Input type="number" placeholder="semi-major m (½ length)" value={semiMajor} onChange={(e) => setSemiMajor(e.target.value)} />
+          <Input type="number" placeholder="semi-minor m (turn r, ≥ ~386)" value={semiMinor} onChange={(e) => setSemiMinor(e.target.value)} />
+          <Input type="number" placeholder="bearing ° (blank = current)" value={bearing} onChange={(e) => setBearing(e.target.value)} />
+          <Button size="sm" onClick={sendRacetrack}>
+            Racetrack here
           </Button>
         </div>
 
