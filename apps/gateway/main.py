@@ -20,6 +20,7 @@ receivers NEVER send directly; they only enqueue. `broadcast()` is fully synchro
 
 import asyncio
 import time
+from collections import deque
 from contextlib import suppress
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -36,13 +37,49 @@ from schemas import (
     VehicleState,
 )
 
+CLIENT_TEL_MAX = 256  # per-browser telemetry buffer; drop-oldest so a slow browser can't balloon memory
+
+
+class ClientOut:
+    """Per-browser outbound buffer with two lanes, drained by ONE sender. Control frames
+    (commandAck / events) are NEVER dropped; telemetry is bounded drop-oldest. A single
+    consumer awaits get(); many producers append synchronously (no await -> atomic). This
+    stops a telemetry burst on a back-pressured browser from silently evicting a pending
+    ack (the old single bounded queue could)."""
+
+    def __init__(self, tel_max: int = CLIENT_TEL_MAX) -> None:
+        self._control: deque[str] = deque()
+        self._telemetry: deque[str] = deque()
+        self._tel_max = tel_max
+        self._wake = asyncio.Event()
+
+    def put_control(self, text: str) -> None:
+        self._control.append(text)
+        self._wake.set()
+
+    def put_telemetry(self, text: str) -> None:
+        self._telemetry.append(text)
+        while len(self._telemetry) > self._tel_max:
+            self._telemetry.popleft()  # drop OLDEST telemetry only — never a control frame
+        self._wake.set()
+
+    async def get(self) -> str:
+        """Control first, then telemetry; block until either has an item. Safe with a
+        single consumer: clear() and wait() have no await between them, so no wakeup is lost."""
+        while True:
+            if self._control:
+                return self._control.popleft()
+            if self._telemetry:
+                return self._telemetry.popleft()
+            self._wake.clear()
+            await self._wake.wait()
+
+
 # --- gateway state (the only thing the gateway remembers) ---
-# One outbound queue per socket, drained by that socket's single sender() task.
-clients: dict[WebSocket, "asyncio.Queue[str]"] = {}  # browser -> its outbound queue
+# One outbound buffer per browser, drained by that socket's single sender() task.
+clients: dict[WebSocket, ClientOut] = {}  # browser -> its two-lane outbound buffer
 producers: dict[str, "asyncio.Queue[str]"] = {}  # vehicleId -> that producer's outbound queue
 latest: dict[str, VehicleState] = {}  # vehicleId -> most-recent state (for snapshot-on-connect)
-
-CLIENT_QUEUE_MAX = 256  # ~8-12 s of buffer; drop-oldest so one slow browser can't balloon memory
 
 # Mission data (cold) now lives with the GCS, not each vehicle: served once to every
 # late-joining client and never duplicated across producers. Moved verbatim from sim.py.
@@ -70,19 +107,18 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _enqueue(q: "asyncio.Queue[str]", text: str) -> None:
-    """Non-blocking put with drop-oldest. Fully synchronous — NEVER await here."""
-    if q.full():
-        q.get_nowait()  # evict oldest; safe (full => not empty) and no await => no race
-    q.put_nowait(text)
+def broadcast_telemetry(text: str) -> None:
+    """Fan telemetry out to every browser (drop-oldest per client). Synchronous on purpose:
+    no await means iterating clients is atomic w.r.t. the loop (no 'dict changed size' race,
+    no head-of-line blocking). Do NOT introduce an await in this function."""
+    for out in clients.values():
+        out.put_telemetry(text)
 
 
-def broadcast(text: str) -> None:
-    """Fan a message out to every browser. Synchronous on purpose: no await means the
-    iteration over clients is atomic w.r.t. the loop (no 'dict changed size' race, no
-    head-of-line blocking). Do NOT introduce an await in this function."""
-    for q in clients.values():
-        _enqueue(q, text)
+def broadcast_control(text: str) -> None:
+    """Fan a control frame (commandAck / event) out to every browser — never dropped."""
+    for out in clients.values():
+        out.put_control(text)
 
 
 def build_snapshot() -> SnapshotMsg:
@@ -113,7 +149,7 @@ async def ws(websocket: WebSocket) -> None:
     """Browser link: unchanged contract. Snapshot on connect, then live telemetry down
     and commands up. The receiver NEVER sends — it only enqueues (one-writer invariant)."""
     await websocket.accept()
-    out: "asyncio.Queue[str]" = asyncio.Queue(maxsize=CLIENT_QUEUE_MAX)
+    out = ClientOut()
     try:
         clients[websocket] = out
         # Registered before this send, so no telemetry tick is missed; the direct send is
@@ -130,12 +166,12 @@ async def ws(websocket: WebSocket) -> None:
                 try:
                     msg = CommandMsg.model_validate_json(raw)
                 except ValidationError:
-                    _enqueue(out, CommandAckMsg(ts=_now_ms(), commandId="", accepted=False, reason="invalid command").model_dump_json())
+                    out.put_control(CommandAckMsg(ts=_now_ms(), commandId="", accepted=False, reason="invalid command").model_dump_json())
                     continue
                 pq = producers.get(msg.vehicleId)
                 if pq is None:
                     # The gateway holds the registry, so only it can answer "no such vehicle".
-                    _enqueue(out, CommandAckMsg(ts=_now_ms(), commandId=msg.commandId, accepted=False, reason=f"vehicle {msg.vehicleId} not connected").model_dump_json())
+                    out.put_control(CommandAckMsg(ts=_now_ms(), commandId=msg.commandId, accepted=False, reason=f"vehicle {msg.vehicleId} not connected").model_dump_json())
                     continue
                 pq.put_nowait(raw)  # route down to the owning producer (unbounded queue)
 
@@ -186,9 +222,9 @@ async def ingest(websocket: WebSocket) -> None:
                     velocity=msg.velocity,
                     status=msg.status,
                 )
-                broadcast(raw)
+                broadcast_telemetry(raw)
             elif isinstance(msg, CommandAckMsg):
-                broadcast(raw)  # single-operator: every browser gets it; unicast is Phase 11
+                broadcast_control(raw)  # single-operator: every browser gets it; unicast is Phase 11
 
     try:
         await _pump([asyncio.create_task(sender()), asyncio.create_task(receiver())])
