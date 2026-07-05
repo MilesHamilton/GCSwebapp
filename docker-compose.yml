@@ -3,16 +3,20 @@
 # runs on the HOST by default (`npm --prefix apps/web run dev`) — WSL2 bind-mount
 # file-watching is slow, so host HMR is far snappier. The browser reaches the
 # containerized gateway at ws://localhost:8000/ws with no code change.
-# First cold start needs --build (new gateway image + the producer's now-first-class
-# `websockets` dep). GATEWAY_URL is left to the code default (ws://gateway:8000/ingest)
-# on purpose: a per-service `environment:` block REPLACES the anchor's wholesale (YAML
-# '<<' is shallow), so anything in the anchor would be silently dropped.
+# Any requirements.txt / Dockerfile change needs `docker compose up --build` (or
+# `docker compose build`): the bind mount hot-reloads source but NEVER picks up new
+# image-baked deps, so a plain `up` would run a stale image (e.g. missing `websockets`)
+# and every producer would die at import with no obvious cause. GATEWAY_URL is left to
+# the code default (ws://gateway:8000/ingest) on purpose: a per-service `environment:`
+# block REPLACES the anchor's wholesale (YAML '<<' is shallow), so anything in the anchor
+# would be silently dropped.
 
 # Shared producer definition. build+image so the image is built once and reused by all
 # three vehicles; each service only adds its own VEHICLE_ID + start pose.
 x-producer: &producer
   build: ./apps/api
   image: gcs-producer
+  restart: unless-stopped # survive a daemon/host restart; a down container can't self-reconnect
   depends_on:
     - gateway
   volumes:
@@ -24,6 +28,7 @@ services:
   # /ingest. Pure relay — no sim, no clock.
   gateway:
     build: ./apps/gateway
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
