@@ -280,14 +280,14 @@ class VehicleSim:
 GEOZONES = [
     Geozone(
         name="R-1 DCA",
-        # DCA airport box grown 1 mile (~1609 m) outward on every side:
-        # +-0.01446 deg lat, +-0.01856 deg lng at this latitude.
+        # DCA airport box grown 2 miles (~3219 m) outward on every side:
+        # +-0.02891 deg lat, +-0.03712 deg lng at this latitude.
         polygon=[
-            (-77.06356, 38.82554),
-            (-77.00244, 38.82554),
-            (-77.00244, 38.87646),
-            (-77.06356, 38.87646),
-            (-77.06356, 38.82554),
+            (-77.08212, 38.81109),
+            (-76.98388, 38.81109),
+            (-76.98388, 38.89091),
+            (-77.08212, 38.89091),
+            (-77.08212, 38.81109),
         ],
     ),
 ]
