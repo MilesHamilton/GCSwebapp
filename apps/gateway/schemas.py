@@ -80,6 +80,14 @@ class ReplayMsg(BaseModel):
     action: Literal["chunk", "play", "pause", "seek"] = "chunk"
 
 
+class VehicleLeftMsg(BaseModel):
+    # Roster departure: the gateway emits this when a producer disconnects, so already-
+    # connected clients can drop the vehicle instead of leaving a frozen ghost on the map.
+    type: Literal["vehicleLeft"] = "vehicleLeft"
+    ts: int
+    vehicleId: str
+
+
 class CommandAckMsg(BaseModel):
     type: Literal["commandAck"] = "commandAck"
     ts: int
@@ -90,7 +98,7 @@ class CommandAckMsg(BaseModel):
 
 # Discriminated union: pydantic validates/parses by the `type` tag.
 ServerMessage = Annotated[
-    Union[TelemetryMsg, MissionMsg, EventMsg, SnapshotMsg, ReplayMsg, CommandAckMsg],
+    Union[TelemetryMsg, MissionMsg, EventMsg, SnapshotMsg, ReplayMsg, CommandAckMsg, VehicleLeftMsg],
     Field(discriminator="type"),
 ]
 

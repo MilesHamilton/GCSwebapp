@@ -48,6 +48,7 @@ type TrackState = {
   recording: Record<string, TimedPoint[]>
   isRecording: boolean
   ingest: (sample: TelemetrySample) => void
+  removeVehicle: (id: string) => void
   setGeozones: (geozones: Geozone[]) => void
   startRecording: () => void
   stopRecording: () => void
@@ -87,6 +88,20 @@ export const useTrackStore = create<TrackState>()((set) => ({
         }
       }
       return next
+    }),
+  // Roster departure (Phase 11): drop a vehicle the gateway says has left, so it stops
+  // rendering as a frozen ghost. Trail + recording go with it. Rebuild the maps without
+  // the id (a new object so any keyed subscribers re-read).
+  removeVehicle: (id) =>
+    set((state) => {
+      if (!(id in state.vehicles)) return {}
+      const vehicles = { ...state.vehicles }
+      const trails = { ...state.trails }
+      const recording = { ...state.recording }
+      delete vehicles[id]
+      delete trails[id]
+      delete recording[id]
+      return { vehicles, trails, recording }
     }),
   setGeozones: (geozones) => set({ geozones }),
   startRecording: () => set({ isRecording: true, recording: {} }),

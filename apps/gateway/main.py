@@ -34,6 +34,7 @@ from schemas import (
     RegisterMsg,
     SnapshotMsg,
     TelemetryMsg,
+    VehicleLeftMsg,
     VehicleState,
 )
 
@@ -234,3 +235,6 @@ async def ingest(websocket: WebSocket) -> None:
         if vehicle_id and producers.get(vehicle_id) is out:
             del producers[vehicle_id]
             latest.pop(vehicle_id, None)
+            # Tell already-connected browsers to drop it (new clients' snapshots already omit
+            # it). Control lane so it can't be evicted by a telemetry burst.
+            broadcast_control(VehicleLeftMsg(ts=_now_ms(), vehicleId=vehicle_id).model_dump_json())

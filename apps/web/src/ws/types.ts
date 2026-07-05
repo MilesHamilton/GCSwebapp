@@ -26,6 +26,9 @@ export type EventMsg = {
 }
 export type SnapshotMsg = { type: 'snapshot'; ts: number; vehicles: VehicleState[]; geozones: Geozone[] }
 export type ReplayMsg = { type: 'replay'; ts: number; action: 'chunk' | 'play' | 'pause' | 'seek' }
+// Roster departure: the gateway sends this when a producer disconnects so the client
+// drops the vehicle instead of leaving a frozen ghost on the map.
+export type VehicleLeftMsg = { type: 'vehicleLeft'; ts: number; vehicleId: string }
 export type CommandAckMsg = {
   type: 'commandAck'
   ts: number
@@ -35,7 +38,14 @@ export type CommandAckMsg = {
 }
 
 // Discriminated union: switch on `type` to route each message.
-export type ServerMessage = TelemetryMsg | MissionMsg | EventMsg | SnapshotMsg | ReplayMsg | CommandAckMsg
+export type ServerMessage =
+  | TelemetryMsg
+  | MissionMsg
+  | EventMsg
+  | SnapshotMsg
+  | ReplayMsg
+  | CommandAckMsg
+  | VehicleLeftMsg
 
 // --- client -> server commands (the first uplink) ---
 // Nullable/omitted fields mean "leave unchanged" (mirrors the server's type_mask idea).
