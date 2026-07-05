@@ -25,7 +25,10 @@ export type RenderFrame = {
 const AIRCRAFT_COLOR: Color = [200, 205, 210]
 const AIRCRAFT_SELECTED: Color = [255, 209, 102]
 const AIRCRAFT_SIZE_SCALE = 5
-const HEADING_OFFSET = 90
+// deck's getOrientation is [pitch, yaw, roll] in degrees; yaw tracks compass heading. The
+// RQ-180 OBJ's nose is authored 180° from deck's forward, so the yaw offset is 270 (= 90 for
+// the mesh's axis + 180 to point the nose along the direction of travel).
+const HEADING_OFFSET = 270
 
 const TRAIL_COLOR: Color = [57, 208, 255, 220]
 const ZONE_LINE: Color = [255, 80, 80, 220]
