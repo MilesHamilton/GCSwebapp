@@ -1,0 +1,116 @@
+# Render blueprint: the same fleet as docker-compose.yml, hosted.
+#   gcs-gateway  — public Web Service, the browser's /ws + producers' /ingest (WebSockets)
+#   uav-01/02/03 — Private Services, each dials the gateway internally on /ingest
+#   gcs-web      — public Web Service (nginx), the SPA behind HTTP Basic Auth
+#
+# All in one region so the private network + service-to-service DNS works. Producers
+# reach the gateway at ws://gcs-gateway:8000/ingest (its bound PORT). The web build gets
+# the gateway's public host wired in via fromService, and speaks wss://<host>/ws.
+#
+# Secrets (sync:false) are entered once in the Render dashboard, not committed here:
+#   gcs-gateway : (none)
+#   gcs-web     : VITE_MAPBOX_TOKEN, BASIC_AUTH_USER, BASIC_AUTH_PASS
+services:
+  - type: web
+    name: gcs-gateway
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./apps/gateway/Dockerfile
+    dockerContext: ./apps/gateway
+    healthCheckPath: /health
+    # prod command: bind Render's $PORT, no --reload; keep the ws keepalive pings that
+    # prune docker-killed / partitioned producers.
+    dockerCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --ws-ping-interval 20 --ws-ping-timeout 20
+    envVars:
+      - key: PORT
+        value: "8000" # deterministic internal port so producers can hardcode :8000
+
+  - type: pserv
+    name: uav-01
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    dockerCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: VEHICLE_ID
+        value: uav-01
+      - key: GATEWAY_URL
+        value: ws://gcs-gateway:8000/ingest
+
+  - type: pserv
+    name: uav-02
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    dockerCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: VEHICLE_ID
+        value: uav-02
+      - key: GATEWAY_URL
+        value: ws://gcs-gateway:8000/ingest
+      - key: START_LAT
+        value: "38.87"
+      - key: START_LNG
+        value: "-77.00"
+      - key: START_HEADING_DEG
+        value: "270"
+      - key: START_ALT_M
+        value: "900"
+      - key: LOITER_LAT
+        value: "38.87"
+      - key: LOITER_LNG
+        value: "-77.02"
+
+  - type: pserv
+    name: uav-03
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    dockerCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: VEHICLE_ID
+        value: uav-03
+      - key: GATEWAY_URL
+        value: ws://gcs-gateway:8000/ingest
+      - key: START_LAT
+        value: "38.82"
+      - key: START_LNG
+        value: "-77.06"
+      - key: START_HEADING_DEG
+        value: "45"
+      - key: START_ALT_M
+        value: "1300"
+      - key: LOITER_LAT
+        value: "38.83"
+      - key: LOITER_LNG
+        value: "-77.05"
+
+  - type: web
+    name: gcs-web
+    runtime: docker
+    region: oregon
+    plan: starter
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: ./apps/web
+    envVars:
+      # Build args (Vite bakes these into the bundle). VITE_GATEWAY_HOST is the gateway's
+      # public hostname; the client speaks wss://<host>/ws.
+      - key: VITE_GATEWAY_HOST
+        fromService:
+          type: web
+          name: gcs-gateway
+          property: host
+      - key: VITE_MAPBOX_TOKEN
+        sync: false # public pk.* token, entered in dashboard
+      # Runtime: nginx Basic Auth front door (entrypoint fails closed if unset).
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASS
+        sync: false
