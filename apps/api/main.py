@@ -25,12 +25,28 @@ TICK_S = 0.1  # 10 Hz: both the sim step and the telemetry emit
 # The gateway this producer feeds. Compose DNS resolves 'gateway' on the network;
 # host-run dev overrides via env to ws://localhost:8000/ingest.
 GATEWAY_URL = os.getenv("GATEWAY_URL", "ws://gateway:8000/ingest")
+VEHICLE_ID = os.getenv("VEHICLE_ID", "uav-01")
 RECONNECT_MIN_MS = 500
 RECONNECT_MAX_MS = 5000
 
+
+def _env_pose() -> dict[str, float]:
+    """Read only the start-pose env vars that are set; the rest fall to VehicleSim's
+    defaults (today's DCA values), so a bare producer reproduces single-vehicle behavior."""
+    keys = {
+        "start_lat": "START_LAT",
+        "start_lng": "START_LNG",
+        "start_heading_deg": "START_HEADING_DEG",
+        "start_alt_m": "START_ALT_M",
+        "loiter_lat": "LOITER_LAT",
+        "loiter_lng": "LOITER_LNG",
+    }
+    return {arg: float(os.environ[env]) for arg, env in keys.items() if env in os.environ}
+
+
 # ONE stateful sim, stepped by ONE clock (this producer's _sim_loop). It keeps flying
 # whether or not the gateway link is up, so a reconnect resumes from the CURRENT state.
-sim = VehicleSim()
+sim = VehicleSim(vehicle_id=VEHICLE_ID, **_env_pose())
 
 
 def _now_ms() -> int:

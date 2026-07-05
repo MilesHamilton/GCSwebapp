@@ -1,10 +1,24 @@
-# One command to run the fleet: `docker compose up` -> gateway on :8000 with the
-# producer(s) behind it (Milestone 4 Phase 10). The web dev server runs on the HOST
-# by default (`npm --prefix apps/web run dev`) — WSL2 bind-mount file-watching is slow,
-# so host HMR is far snappier. The browser reaches the containerized gateway at
-# ws://localhost:8000/ws with no code change.
-# First cold start needs a build: `docker compose up --build` (new gateway image + the
-# producer's now-first-class `websockets` dep).
+# One command to run the fleet: `docker compose up --build` -> gateway on :8000 with
+# a fleet of producer containers behind it (Milestone 4 Phase 10). The web dev server
+# runs on the HOST by default (`npm --prefix apps/web run dev`) — WSL2 bind-mount
+# file-watching is slow, so host HMR is far snappier. The browser reaches the
+# containerized gateway at ws://localhost:8000/ws with no code change.
+# First cold start needs --build (new gateway image + the producer's now-first-class
+# `websockets` dep). GATEWAY_URL is left to the code default (ws://gateway:8000/ingest)
+# on purpose: a per-service `environment:` block REPLACES the anchor's wholesale (YAML
+# '<<' is shallow), so anything in the anchor would be silently dropped.
+
+# Shared producer definition. build+image so the image is built once and reused by all
+# three vehicles; each service only adds its own VEHICLE_ID + start pose.
+x-producer: &producer
+  build: ./apps/api
+  image: gcs-producer
+  depends_on:
+    - gateway
+  volumes:
+    - ./apps/api:/app # live edits -> uvicorn --reload picks them up
+    - /app/.venv # anonymous volume: don't let the host .venv shadow the image's deps
+
 services:
   # The fan-in gateway: owns host :8000 (the browser's /ws) and accepts producers on
   # /ingest. Pure relay — no sim, no clock.
@@ -13,18 +27,39 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./apps/gateway:/app # live edits -> uvicorn --reload picks them up
-      - /app/.venv # anonymous volume: don't let the host .venv shadow the image's deps
-
-  # A vehicle producer: runs its own sim + dials the gateway. No host port — it is
-  # reached only over the compose network (GATEWAY_URL defaults to ws://gateway:8000).
-  api:
-    build: ./apps/api
-    depends_on:
-      - gateway
-    volumes:
-      - ./apps/api:/app
+      - ./apps/gateway:/app
       - /app/.venv
+
+  # --- the fleet: distinct start pose + loiter center + altitude so the aircraft are
+  # visually separable (they don't converge on one ring). All start inside the R-1 DCA
+  # zone. EXACTLY ONE producer is uav-01 — the browser sends no vehicleId yet (Phase 11),
+  # so every command defaults to 'uav-01'; without it, commands would be unroutable.
+  uav-01: # defaults reproduce today's single-vehicle DCA behavior exactly
+    <<: *producer
+    environment:
+      - VEHICLE_ID=uav-01
+
+  uav-02:
+    <<: *producer
+    environment:
+      - VEHICLE_ID=uav-02
+      - START_LAT=38.87
+      - START_LNG=-77.00
+      - START_HEADING_DEG=270
+      - START_ALT_M=900
+      - LOITER_LAT=38.87
+      - LOITER_LNG=-77.02
+
+  uav-03:
+    <<: *producer
+    environment:
+      - VEHICLE_ID=uav-03
+      - START_LAT=38.82
+      - START_LNG=-77.06
+      - START_HEADING_DEG=45
+      - START_ALT_M=1300
+      - LOITER_LAT=38.83
+      - LOITER_LNG=-77.05
 
   # Opt-in containerized web (mainly for a clone-and-run demo, not day-to-day dev):
   #   docker compose --profile full-container up

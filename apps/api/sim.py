@@ -95,22 +95,35 @@ def _build_racetrack_path(
 class VehicleSim:
     """A single point-mass aircraft flying a loiter, integrated at a fixed timestep."""
 
-    def __init__(self, vehicle_id: str = "uav-01", veh: VehicleCharacteristics = RQ_180) -> None:
+    def __init__(
+        self,
+        vehicle_id: str = "uav-01",
+        veh: VehicleCharacteristics = RQ_180,
+        *,
+        start_lat: float = RWY01_LAT,
+        start_lng: float = RWY01_LNG,
+        start_heading_deg: float = RWY_BEARING_DEG,
+        start_alt_m: float = CRUISE_ALT_M,
+        loiter_lat: float = CENTER_LAT,
+        loiter_lng: float = CENTER_LNG,
+    ) -> None:
         self.vehicle_id = vehicle_id
         self.veh = veh
-        # --- integrated state --- start on DCA RWY 01, heading down the runway; the
-        # default loiter then captures it into an orbit around the airport (midpoint).
-        self.lat = RWY01_LAT
-        self.lng = RWY01_LNG
-        self.alt_m = CRUISE_ALT_M
-        self.heading_deg = RWY_BEARING_DEG  # compass heading (0=N, 90=E)
+        # --- integrated state --- start pose (defaults = DCA RWY 01, heading down the
+        # runway); the default loiter then captures it into an orbit around loiter_lat/lng.
+        # A fleet passes distinct poses + loiter centers so the aircraft don't converge on
+        # one ring (the '2-3 distinct aircraft' criterion).
+        self.lat = start_lat
+        self.lng = start_lng
+        self.alt_m = start_alt_m
+        self.heading_deg = start_heading_deg  # compass heading (0=N, 90=E)
         self.speed_mps = veh.cruise_speed_mps
         self.roll_deg = 0.0  # derived each step, for display
         self.battery_pct = 100.0
-        # --- loiter setpoints (default guidance: orbit the airport) ---
+        # --- loiter setpoints (default guidance: orbit the loiter center) ---
         self.mode = "LOITER"
-        self.loiter_lat = CENTER_LAT
-        self.loiter_lng = CENTER_LNG
+        self.loiter_lat = loiter_lat
+        self.loiter_lng = loiter_lng
         self.loiter_radius_m = LOITER_RADIUS_M
         self.loiter_dir = LOITER_DIR
         self.pitch_deg = 0.0  # derived from vertical speed, for display

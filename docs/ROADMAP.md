@@ -506,9 +506,11 @@ Rejected topologies (defend these out loud):
     fleet must be visually distinct (staggered runways/altitudes/loiter centers).
   - **Prune a vehicle when its producer disconnects** *vs leaving ghosts* → a killed
     container must remove its plane + trail from every client.
-- **Done when:** `docker compose up` runs a gateway + 2–3 producer containers; the
-  client (one socket) shows 2–3 distinct aircraft flying; killing one producer
-  container removes exactly that plane; the wire contract to the client is unchanged.
+- **Done when:** `docker compose up --build` runs a gateway + 2–3 producer containers;
+  the client (one socket) shows 2–3 distinct aircraft flying; killing a producer
+  container **freezes** its plane — the gateway drops it from the registry so a
+  newly-connecting client's snapshot omits it (removing it from an already-open map is
+  Phase 11's roster prune); the wire contract to the client is unchanged.
 - **Commits:** `feat: internal vehicle↔gateway protocol (register + relay frames)` ·
   `feat: gateway service (fan-in + fan-out router)` ·
   `refactor: api becomes a gateway producer (dials /ingest)` ·
