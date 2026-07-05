@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sendCommand } from '../ws/client'
+import { spawnVehicle, despawnVehicle } from '../ws/simhost'
 import { useCommandStore } from '../state/commandStore'
 import { useUiStore } from '../state/uiStore'
 import { useTrackStore } from '../state/trackStore'
@@ -85,6 +86,21 @@ export default function CommandPanel() {
                 All
               </Button>
             )}
+          </div>
+          {/* Runtime fleet: the sim-host spawns/stops sims; the new/removed plane reaches
+              the map via the normal telemetry + roster (vehicleLeft) path. */}
+          <div className="flex gap-1">
+            <Button size="sm" variant="secondary" onClick={() => void spawnVehicle()}>
+              + Add vehicle
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!selectedId}
+              onClick={() => selectedId && void despawnVehicle(selectedId)}
+            >
+              Remove
+            </Button>
           </div>
         </div>
 

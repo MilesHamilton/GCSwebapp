@@ -66,6 +66,15 @@ services:
       - LOITER_LAT=38.83
       - LOITER_LNG=-77.05
 
+  # Runtime spawn/despawn control plane (Phase 11): same image, runs simhost:app instead
+  # of main:app. The operator panel calls its host port (8001) to add/remove vehicles at
+  # runtime; spawned sims dial the gateway like any producer, so they need no new container.
+  sim-host:
+    <<: *producer
+    command: ["uvicorn", "simhost:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8001:8000"
+
   # Opt-in containerized web (mainly for a clone-and-run demo, not day-to-day dev):
   #   docker compose --profile full-container up
   web:
