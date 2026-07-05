@@ -3,7 +3,15 @@ import { useCommandStore } from '../state/commandStore'
 import { useUiStore } from '../state/uiStore'
 import type { Command, CommandMsg, ServerMessage, VehicleState } from './types'
 
-const WS_URL = 'ws://localhost:8000/ws'
+// Deployed builds inject the gateway's public host (VITE_GATEWAY_HOST, wired to the
+// Render gateway service in render.yaml) and we speak wss://; dev falls back to the
+// local containerized gateway. A full VITE_WS_URL wins if set. Vite bakes import.meta.env
+// at BUILD time, so these must be present as build args when the prod image is built.
+const WS_URL =
+  (import.meta.env.VITE_WS_URL as string | undefined) ||
+  (import.meta.env.VITE_GATEWAY_HOST
+    ? `wss://${import.meta.env.VITE_GATEWAY_HOST}/ws`
+    : 'ws://localhost:8000/ws')
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 5000
 
