@@ -14,7 +14,7 @@ diverge per-connection, so the world must be a single shared instance.
 import math
 import time
 
-from schemas import Attitude, Command, Geozone, Position, SnapshotMsg, Status, TelemetryMsg, VehicleState, Velocity
+from schemas import Attitude, Command, Position, Status, TelemetryMsg, VehicleState, Velocity
 from vehicle import G, RQ_180, VehicleCharacteristics
 
 M_PER_DEG_LAT = 111_320.0
@@ -263,31 +263,14 @@ class VehicleSim:
             status=Status(mode=self.mode, batteryPct=self.battery_pct),
         )
 
-    def snapshot(self) -> SnapshotMsg:
+    def state(self) -> VehicleState:
+        """Current vehicle state, no type/ts — the producer's register-handshake payload
+        (and what the gateway caches to build snapshots). Reuses telemetry()'s projection."""
         t = self.telemetry()
-        vehicle = VehicleState(
+        return VehicleState(
             vehicleId=t.vehicleId,
             position=t.position,
             attitude=t.attitude,
             velocity=t.velocity,
             status=t.status,
         )
-        return SnapshotMsg(ts=t.ts, vehicles=[vehicle], geozones=GEOZONES)
-
-
-# Mission data (cold): served in the snapshot so a late joiner sees zones it would
-# otherwise miss — they aren't in the telemetry stream.
-GEOZONES = [
-    Geozone(
-        name="R-1 DCA",
-        # DCA airport box grown 2 miles (~3219 m) outward on every side:
-        # +-0.02891 deg lat, +-0.03712 deg lng at this latitude.
-        polygon=[
-            (-77.08212, 38.81109),
-            (-76.98388, 38.81109),
-            (-76.98388, 38.89091),
-            (-77.08212, 38.89091),
-            (-77.08212, 38.81109),
-        ],
-    ),
-]

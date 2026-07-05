@@ -1,15 +1,30 @@
-# One command to run the autonomy computer: `docker compose up` -> api on :8000.
-# The web dev server runs on the HOST by default (`npm --prefix apps/web run dev`) —
-# WSL2 bind-mount file-watching is slow, so host HMR is far snappier. The browser
-# reaches the containerized api at ws://localhost:8000/ws with no code change.
+# One command to run the fleet: `docker compose up` -> gateway on :8000 with the
+# producer(s) behind it (Milestone 4 Phase 10). The web dev server runs on the HOST
+# by default (`npm --prefix apps/web run dev`) — WSL2 bind-mount file-watching is slow,
+# so host HMR is far snappier. The browser reaches the containerized gateway at
+# ws://localhost:8000/ws with no code change.
+# First cold start needs a build: `docker compose up --build` (new gateway image + the
+# producer's now-first-class `websockets` dep).
 services:
-  api:
-    build: ./apps/api
+  # The fan-in gateway: owns host :8000 (the browser's /ws) and accepts producers on
+  # /ingest. Pure relay — no sim, no clock.
+  gateway:
+    build: ./apps/gateway
     ports:
       - "8000:8000"
     volumes:
-      - ./apps/api:/app # live edits -> uvicorn --reload picks them up
+      - ./apps/gateway:/app # live edits -> uvicorn --reload picks them up
       - /app/.venv # anonymous volume: don't let the host .venv shadow the image's deps
+
+  # A vehicle producer: runs its own sim + dials the gateway. No host port — it is
+  # reached only over the compose network (GATEWAY_URL defaults to ws://gateway:8000).
+  api:
+    build: ./apps/api
+    depends_on:
+      - gateway
+    volumes:
+      - ./apps/api:/app
+      - /app/.venv
 
   # Opt-in containerized web (mainly for a clone-and-run demo, not day-to-day dev):
   #   docker compose --profile full-container up
