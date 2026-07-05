@@ -71,3 +71,23 @@ Loiter is a giant series of HSA's that include a fixed center, HSA's (heading, s
 **Seed question:** *Why containerize the sim for a learning app — what does Docker actually buy you here? A real GCS and its flight controller are separate machines; should the autonomy computer be its own container talking to FastAPI over a bus, or an asyncio task inside FastAPI? Where is that "separation" already earned in the code?*
 
 _(your words)_
+
+---
+
+## Milestone 4 — Multi-vehicle / distributed GCS
+
+## Phase 10 — Multi-vehicle gateway (fan-in aggregator)
+
+**Seed question:** *The client already keys telemetry, trails, and aircraft by vehicleId — so why isn't a second vehicle "free"? What has to exist on the backend for two separate containers' telemetry to reach one map, and for a command to reach the right vehicle? Why make each producer dial the gateway rather than the gateway dial each vehicle?*
+
+A second vehicle isn't "free" because, although the client is already fleet-ready (the store keys everything by `vehicleId` and the layer factory renders a *list* of aircraft), there's nothing on the backend to carry two separate containers' telemetry onto one map, or to steer a command to the right plane. We add a **gateway** — a new FastAPI service that sits between the browser and the vehicles — and split the world into three roles: **producers** (each is a container running its own `VehicleSim` + step-loop, so N vehicles means N sims and N clocks — the `_sim_loop` moved *with* the sim out of the old `apps/api`), the **gateway** itself (a pure relay/router that owns no sim and no clock — only a registry mapping `vehicleId → that producer's connection`, plus the set of connected browsers), and the **client** (the browser, unchanged, still one `/ws` link → store → deck). Telemetry flows *up*: each self-clocked producer streams its state to the gateway, which fans it out to every browser tagged with its `vehicleId`, and the client's existing `ingest()` drops it into the right slot. A command flows *down*: `sendCommand(vehicleId)` → gateway → registry lookup → routed to the one producer that can `apply()` it → the change surfaces in that producer's next telemetry frame.
+
+We chose this **gateway/fan-in (Option B)** over the two rejected alternatives: letting the client open *N* sockets (Option A — cheapest, but the client grows a connection manager and must know every endpoint, and it doesn't scale to a dynamic fleet), and a message broker like Redis/MQTT (Option C — the real scale answer, but overkill for a handful of vehicles; the gateway's fan-in is exactly where a broker would slot in later). Producers **dial** the gateway and self-register rather than the gateway dialing a config list, so fleet membership is dynamic and runtime-spawned sims (Phase 11) join the same way. The internal `/ingest` link is full-duplex just like today's `/ws` (concurrent sender + receiver): **up** it carries `register` (the one genuinely new frame — `vehicleId` + start pose, so the gateway can build its registry), `telemetry`, and `commandAck`; **down** it carries `command`. We reuse the existing `TelemetryMsg`/`CommandMsg` because they *already* carry `vehicleId`, so the only new type is `register` — the accepted tradeoff being that the internal contract is now coupled to the client-facing wire types (one source of truth). The key invariant shift from Phase 6: "exactly one sim, one clock" becomes "one sim + one clock *per producer*," and the gateway deliberately owns neither — it only remembers who's who.
+
+## Phase 11 — Fleet control (per-vehicle command + runtime spawn)
+
+**Seed question:** *With one global activeSocket and one lastAck, what breaks when a command could go to any of three vehicles? Why reuse the map's selectedId as the command target instead of a separate dropdown? And why is runtime "add a vehicle" a new sim process that registers rather than a new Docker container — what would the container path cost?*
+
+**Seed question (operator fleet selector + broadcast):** *You already select a vehicle by clicking it on the map (selectedVehicleId, cold lane). Why add a panel selector too — and should "select all" send one command the gateway fans out, or N commands from the client? What does each cost, and which keeps the client a thin producer?*
+
+_(your words)_
