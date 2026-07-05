@@ -91,6 +91,7 @@ class VehicleLeftMsg(BaseModel):
 class CommandAckMsg(BaseModel):
     type: Literal["commandAck"] = "commandAck"
     ts: int
+    vehicleId: str = ""  # which vehicle answered; "" when the gateway couldn't even parse the command
     commandId: str  # echoes the command it answers
     accepted: bool
     reason: str | None = None  # human-readable when rejected (e.g. violates a vehicle limit)

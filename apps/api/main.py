@@ -95,10 +95,10 @@ async def _ingest_client() -> None:
                         try:
                             msg = CommandMsg.model_validate_json(raw)
                         except ValidationError:
-                            await ws.send(CommandAckMsg(ts=_now_ms(), commandId="", accepted=False, reason="invalid command").model_dump_json())
+                            await ws.send(CommandAckMsg(ts=_now_ms(), vehicleId=VEHICLE_ID, commandId="", accepted=False, reason="invalid command").model_dump_json())
                             continue
                         accepted, reason = sim.apply(msg.command)  # the sim owns the truth
-                        await ws.send(CommandAckMsg(ts=_now_ms(), commandId=msg.commandId, accepted=accepted, reason=reason).model_dump_json())
+                        await ws.send(CommandAckMsg(ts=_now_ms(), vehicleId=VEHICLE_ID, commandId=msg.commandId, accepted=accepted, reason=reason).model_dump_json())
 
                 tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
                 try:

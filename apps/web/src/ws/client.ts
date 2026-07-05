@@ -50,14 +50,16 @@ function handle(msg: ServerMessage): void {
   }
 }
 
-// Send an uplink command — the app's first client->server traffic. No-op (with a warn)
-// if the socket isn't open. The server validates it and replies with a `commandAck`.
-export function sendCommand(command: Command): void {
+// Send an uplink command to a specific vehicle. No-op (with a warn) if the socket isn't
+// open. The gateway routes by vehicleId (Phase 11); "*" broadcasts to the whole fleet.
+// An omitted vehicleId falls to the server default ("uav-01"). The reply is a commandAck.
+export function sendCommand(command: Command, vehicleId?: string): void {
   if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
     console.warn('[ws] cannot send command; socket not open')
     return
   }
   const msg: CommandMsg = { type: 'command', ts: Date.now(), commandId: crypto.randomUUID(), command }
+  if (vehicleId) msg.vehicleId = vehicleId
   activeSocket.send(JSON.stringify(msg))
 }
 

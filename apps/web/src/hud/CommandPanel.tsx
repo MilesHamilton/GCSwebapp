@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { sendCommand } from '../ws/client'
 import { useCommandStore } from '../state/commandStore'
+import { useUiStore } from '../state/uiStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +19,12 @@ export default function CommandPanel() {
   const [semiMajor, setSemiMajor] = useState('3000')
   const [semiMinor, setSemiMinor] = useState('600')
   const [bearing, setBearing] = useState('')
-  const lastAck = useCommandStore((s) => s.lastAck)
+  // Commands target the SELECTED vehicle (map click or the panel selector). No selection
+  // -> omit vehicleId so the server default ('uav-01') still works. The ack is read for
+  // that same vehicle, so a fleet's acks don't clobber each other.
+  const selectedId = useUiStore((s) => s.selectedVehicleId)
+  const target = selectedId ?? undefined
+  const lastAck = useCommandStore((s) => (selectedId ? s.acks[selectedId] : undefined))
 
   // Empty OR non-numeric -> undefined, so a blank/typo cleanly means "leave unchanged"
   // (rather than sending NaN, which JSON turns into a silent null).
@@ -29,21 +35,24 @@ export default function CommandPanel() {
   }
 
   const sendHsa = () =>
-    sendCommand({ kind: 'hsa', headingDeg: num(heading), speedMps: num(speed), altM: num(altitude) })
-  const sendLoiter = () => sendCommand({ kind: 'loiter', radiusM: num(radius), direction })
+    sendCommand({ kind: 'hsa', headingDeg: num(heading), speedMps: num(speed), altM: num(altitude) }, target)
+  const sendLoiter = () => sendCommand({ kind: 'loiter', radiusM: num(radius), direction }, target)
   const sendRacetrack = () =>
-    sendCommand({
-      kind: 'racetrack',
-      semiMajorM: num(semiMajor) ?? 0,
-      semiMinorM: num(semiMinor) ?? 0,
-      bearingDeg: num(bearing),
-      direction,
-    })
+    sendCommand(
+      {
+        kind: 'racetrack',
+        semiMajorM: num(semiMajor) ?? 0,
+        semiMinorM: num(semiMinor) ?? 0,
+        bearingDeg: num(bearing),
+        direction,
+      },
+      target,
+    )
 
   return (
     <Card className="absolute top-3 left-3 z-10 w-56 gap-3 py-3">
       <CardHeader className="px-3">
-        <CardTitle className="text-sm">Command</CardTitle>
+        <CardTitle className="text-sm">Command → {selectedId ?? 'uav-01 (default)'}</CardTitle>
       </CardHeader>
       <CardContent className="gap-4 px-3">
         <div className="flex flex-col gap-2">

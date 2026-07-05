@@ -32,6 +32,7 @@ export type VehicleLeftMsg = { type: 'vehicleLeft'; ts: number; vehicleId: strin
 export type CommandAckMsg = {
   type: 'commandAck'
   ts: number
+  vehicleId: string
   commandId: string
   accepted: boolean
   reason?: string | null

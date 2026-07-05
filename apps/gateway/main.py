@@ -172,7 +172,7 @@ async def ws(websocket: WebSocket) -> None:
                 pq = producers.get(msg.vehicleId)
                 if pq is None:
                     # The gateway holds the registry, so only it can answer "no such vehicle".
-                    out.put_control(CommandAckMsg(ts=_now_ms(), commandId=msg.commandId, accepted=False, reason=f"vehicle {msg.vehicleId} not connected").model_dump_json())
+                    out.put_control(CommandAckMsg(ts=_now_ms(), vehicleId=msg.vehicleId, commandId=msg.commandId, accepted=False, reason=f"vehicle {msg.vehicleId} not connected").model_dump_json())
                     continue
                 pq.put_nowait(raw)  # route down to the owning producer (unbounded queue)
 
