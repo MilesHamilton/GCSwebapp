@@ -97,7 +97,7 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
 | **9** | UI foundation (Tailwind + shadcn/ui) | shadcn copy-in *vs packaged lib (MUI)* · Tailwind *vs CSS modules* · **prereq for 4 & 5's shadcn UI** | tailwind builds · a shadcn component renders · `CommandPanel` re-skinned · hot path untouched |
 | | **▸ Milestone 4 — multi-vehicle / distributed GCS** | | |
 | **10** | Multi-vehicle gateway (fan-in aggregator) | gateway fan-in *vs client opens N sockets* · producers **dial** gateway (self-register) *vs gateway dials a config list* · reuse telemetry/command contract + thin `register` frame · env start-pose | 2–3 vehicles (each its own container) fly via **one** client socket · kill a container → its plane leaves |
-| **11** | Fleet control (per-vehicle command + runtime spawn) | command targets the **selected** vehicle *vs a target dropdown* · ack keyed by vehicleId · runtime "new vehicle" = a **sim task** that registers *vs a container per click (`docker.sock`)* | click a plane → command just it · "Add vehicle" spawns one live · producer drop prunes it |
+| **11** | Fleet control (per-vehicle command + runtime spawn) | command targets the **selected** vehicle *vs a target dropdown* · **panel selector + All broadcast** (`*` fanned out by gateway) · ack keyed by vehicleId · runtime "new vehicle" = a **sim task** that registers *vs a container per click (`docker.sock`)* | click/pick a plane → command just it · **All → every vehicle** · "Add vehicle" spawns one live · producer drop prunes it |
 
 ---
 
@@ -545,3 +545,27 @@ Rejected topologies (defend these out loud):
 - **Commits:** `feat: roster message + client fleet awareness (prune on departure)` ·
   `feat: command targeting by selected vehicle` ·
   `feat: spawn/despawn vehicle from the panel (runtime fleet)`
+- **▸ Added 2026-07-05 — operator fleet selector + broadcast:** extend the command
+  panel with an explicit **vehicle selector** — a row of the live aircraft plus an
+  **All** button — so the command target is picked from the panel (mirroring map
+  click-to-select / follow), not only by clicking a plane on the map. **All**
+  broadcasts: one command every vehicle executes.
+  - **Seed question (you draft first):** *You already select a vehicle by clicking it
+    on the map (`selectedVehicleId`, cold lane). Why add a panel selector too — and
+    should "select all" send **one** command the gateway fans out, or **N** commands
+    from the client? What does each cost, and which keeps the client a thin producer?*
+  - **Key decisions → alternative rejected:**
+    - **Panel selector bound to the existing `selectedVehicleId`** *vs a second,
+      command-only selection model* → one selection drives follow, the HUD card, *and*
+      the command target; two models drift out of sync.
+    - **"All" = one command with a broadcast target (`*`) the gateway fans out** *vs
+      the client looping and sending N commands* → one message on the wire, the gateway
+      already owns the routing table, and the client stays thin; N-from-client
+      duplicates routing and races on partial sends.
+    - **A visible selector in the panel** *vs map-click-only* → operate a fleet without
+      hunting for one plane among several on the map.
+  - **Done when:** the panel lists the live aircraft; picking one targets it (and
+    follows / fills the card); **All** sends a single command every vehicle executes;
+    the active target is obvious at a glance.
+  - **Commits:** `feat: operator-panel vehicle selector (binds selectedVehicleId)` ·
+    `feat: broadcast ("All") command → gateway fan-out`
