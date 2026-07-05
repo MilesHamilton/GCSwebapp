@@ -1,0 +1,8 @@
+# Keep the build context lean and avoid masking the image's npm ci install with the
+# host's node_modules. Secrets never enter the image (VITE_* come in as build args).
+node_modules
+dist
+.env
+.env.*
+!.env.example
+*.log

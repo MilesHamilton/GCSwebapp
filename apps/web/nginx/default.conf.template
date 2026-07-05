@@ -1,0 +1,17 @@
+# Static SPA host behind HTTP Basic Auth. ${PORT} is envsubst'd from env at boot
+# (Render sets it; the Dockerfile defaults it for standalone runs). $uri is an nginx
+# runtime var, NOT an env var, so envsubst leaves it untouched.
+server {
+    listen       ${PORT};
+    server_name  _;
+    root         /usr/share/nginx/html;
+    index        index.html;
+
+    auth_basic           "GCS Restricted";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # SPA: unknown paths fall back to index.html so client routing works on refresh.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
