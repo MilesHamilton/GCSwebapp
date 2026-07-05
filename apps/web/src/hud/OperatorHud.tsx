@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useUiStore, type LayerKey } from '../state/uiStore'
+import { useShallow } from 'zustand/react/shallow'
+import { useUiStore } from '../state/uiStore'
 import { useTrackStore, type Vehicle } from '../state/trackStore'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,17 +26,15 @@ function useSampledVehicle(id: string | null): Vehicle | null {
   return v
 }
 
-const LAYERS: { key: LayerKey; label: string }[] = [
-  { key: 'aircraft', label: 'Aircraft' },
-  { key: 'trail', label: 'Trail' },
-  { key: 'geozones', label: 'Zones' },
-]
-
 export default function OperatorHud() {
   const connected = useUiStore((s) => s.connected)
-  const visibility = useUiStore((s) => s.visibility)
   const follow = useUiStore((s) => s.follow)
+  const showGeozones = useUiStore((s) => s.showGeozones)
+  const hidden = useUiStore((s) => s.hiddenVehicles)
   const selectedId = useUiStore((s) => s.selectedVehicleId)
+  // Roster for the fleet list. Shallow-compare the id LIST so this re-renders only on
+  // join/leave — not on every 10 Hz telemetry tick (keeps the hot path off React).
+  const vehicleIds = useTrackStore(useShallow((s) => Object.keys(s.vehicles).sort()))
   const v = useSampledVehicle(selectedId)
 
   return (
@@ -46,29 +45,47 @@ export default function OperatorHud() {
       </CardHeader>
       <CardContent className="gap-3 px-3">
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Layers</span>
-          <div className="flex gap-1">
-            {LAYERS.map((l) => (
+          <span className="text-muted-foreground text-xs">Fleet — select · show/hide</span>
+          {vehicleIds.length === 0 && <span className="text-muted-foreground text-xs">no vehicles</span>}
+          {vehicleIds.map((id) => (
+            <div key={id} className="flex items-center gap-1">
               <Button
-                key={l.key}
                 size="sm"
-                variant={visibility[l.key] ? 'default' : 'outline'}
-                onClick={() => useUiStore.getState().toggleLayer(l.key)}
+                variant={selectedId === id ? 'default' : 'outline'}
+                className="flex-1 justify-start"
+                onClick={() => useUiStore.getState().setSelected(id)}
               >
-                {l.label}
+                {id}
               </Button>
-            ))}
-          </div>
+              <Button
+                size="sm"
+                variant={hidden[id] ? 'outline' : 'secondary'}
+                className="text-muted-foreground w-16"
+                onClick={() => useUiStore.getState().toggleVehicleHidden(id)}
+              >
+                {hidden[id] ? 'hidden' : 'shown'}
+              </Button>
+            </div>
+          ))}
         </div>
 
-        <Button
-          size="sm"
-          variant={follow ? 'default' : 'outline'}
-          disabled={!selectedId}
-          onClick={() => useUiStore.getState().toggleFollow()}
-        >
-          {follow ? 'Following' : selectedId ? 'Follow' : 'Follow (select first)'}
-        </Button>
+        <div className="flex gap-1">
+          <Button
+            size="sm"
+            variant={showGeozones ? 'default' : 'outline'}
+            onClick={() => useUiStore.getState().toggleGeozones()}
+          >
+            Zones
+          </Button>
+          <Button
+            size="sm"
+            variant={follow ? 'default' : 'outline'}
+            disabled={!selectedId}
+            onClick={() => useUiStore.getState().toggleFollow()}
+          >
+            {follow ? 'Following' : selectedId ? 'Follow' : 'Follow (select first)'}
+          </Button>
+        </div>
 
         <div className="flex flex-col gap-1">
           <span className="text-muted-foreground text-xs">Selected vehicle</span>
@@ -92,7 +109,7 @@ export default function OperatorHud() {
               <span>{Math.round(v.batteryPct ?? 0)}%</span>
             </div>
           ) : (
-            <span className="text-muted-foreground text-xs">click the aircraft to select</span>
+            <span className="text-muted-foreground text-xs">select a vehicle above or click it on the map</span>
           )}
         </div>
       </CardContent>

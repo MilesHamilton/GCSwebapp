@@ -14,7 +14,8 @@ export type RenderFrame = {
   trails: Trail[]
   geozones: Geozone[]
   currentTime: number // epoch ms; TripsLayer reveals each trail up to here
-  visibility: { geozones: boolean; trail: boolean; aircraft: boolean }
+  showGeozones: boolean // geozones = the one global visibility toggle
+  hiddenVehicles: Record<string, boolean> // per-vehicle hide: drops that craft's mesh + trail
   selectedId: string | null
   onSelectVehicle: (id: string) => void
 }
@@ -35,7 +36,10 @@ const GEOZONE_HEIGHT_M = 2000 // extrude the zone into a floor->2 km airspace ca
 const TRAIL_WINDOW_MS = 1_000_000_000 // effectively unbounded: show the whole path up to currentTime
 
 export function buildLayers(frame: RenderFrame) {
-  const trails = frame.trails.filter((t) => t.points.length >= 2)
+  // Per-vehicle hide: a hidden craft drops BOTH its mesh and its trail (it keeps flying).
+  const hidden = frame.hiddenVehicles
+  const vehicles = frame.vehicles.filter((v) => !hidden[v.id])
+  const trails = frame.trails.filter((t) => !hidden[t.id] && t.points.length >= 2)
 
   let base = Infinity
   for (const t of trails) for (const p of t.points) if (p.timestamp < base) base = p.timestamp
@@ -45,7 +49,7 @@ export function buildLayers(frame: RenderFrame) {
     new PolygonLayer<Geozone>({
       id: 'geozones',
       data: frame.geozones,
-      visible: frame.visibility.geozones,
+      visible: frame.showGeozones,
       getPolygon: (d) => d.polygon,
       // A restricted area has vertical extent — render it as an extruded WIREFRAME cage
       // (no filled walls). That reads as a 3D airspace volume with no translucent faces
@@ -64,7 +68,6 @@ export function buildLayers(frame: RenderFrame) {
     new TripsLayer<Trail>({
       id: 'trails',
       data: trails,
-      visible: frame.visibility.trail,
       getPath: (t) => t.points.map((p): [number, number, number] => [p.coordinates[0], p.coordinates[1], p.altM]),
       getTimestamps: (t) => t.points.map((p) => p.timestamp - base),
       getColor: TRAIL_COLOR,
@@ -78,8 +81,7 @@ export function buildLayers(frame: RenderFrame) {
     }),
     new SimpleMeshLayer<Vehicle>({
       id: 'aircraft',
-      data: frame.vehicles,
-      visible: frame.visibility.aircraft,
+      data: vehicles,
       mesh: '/models/rq-180.obj',
       loaders: [OBJLoader],
       // 3D: fly the mesh at its real altitude (z=altM) so terrain/buildings can occlude it

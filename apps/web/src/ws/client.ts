@@ -40,8 +40,9 @@ function handle(msg: ServerMessage): void {
       useCommandStore.getState().setAck(msg)
       break
     case 'vehicleLeft':
-      // Roster departure: drop the vehicle; clear selection/follow if it pointed here.
+      // Roster departure: drop the vehicle; clear selection/follow + its hidden flag.
       store.removeVehicle(msg.vehicleId)
+      useUiStore.getState().clearVehicleHidden(msg.vehicleId)
       if (useUiStore.getState().selectedVehicleId === msg.vehicleId) useUiStore.getState().setSelected(null)
       break
     // mission -> cold lane (Phase 5), event -> alerts, replay -> Phase 4

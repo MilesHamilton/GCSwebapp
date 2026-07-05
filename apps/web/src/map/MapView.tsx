@@ -73,7 +73,8 @@ function resolveFrame(): RenderFrame {
   const ui = useUiStore.getState()
   const shared = {
     geozones: track.geozones,
-    visibility: ui.visibility,
+    showGeozones: ui.showGeozones,
+    hiddenVehicles: ui.hiddenVehicles,
     selectedId: ui.selectedVehicleId,
     onSelectVehicle: (id: string) => useUiStore.getState().setSelected(id),
   }
