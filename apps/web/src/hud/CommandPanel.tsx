@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { sendCommand } from '../ws/client'
 import { useCommandStore } from '../state/commandStore'
 import { useUiStore } from '../state/uiStore'
+import { useTrackStore } from '../state/trackStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,6 +27,9 @@ export default function CommandPanel() {
   const selectedId = useUiStore((s) => s.selectedVehicleId)
   const target = selectedId ?? undefined
   const lastAck = useCommandStore((s) => (selectedId ? s.acks[selectedId] : undefined))
+  // Live roster for the selector. Shallow-compare the id LIST so this re-renders only when
+  // a vehicle joins/leaves — not on every 10 Hz telemetry tick (keeps the hot path off React).
+  const vehicleIds = useTrackStore(useShallow((s) => Object.keys(s.vehicles).sort()))
 
   // Empty OR non-numeric -> undefined, so a blank/typo cleanly means "leave unchanged"
   // (rather than sending NaN, which JSON turns into a silent null).
@@ -55,6 +60,23 @@ export default function CommandPanel() {
         <CardTitle className="text-sm">Command → {selectedId ?? 'uav-01 (default)'}</CardTitle>
       </CardHeader>
       <CardContent className="gap-4 px-3">
+        <div className="flex flex-col gap-1">
+          <Label className="text-muted-foreground text-xs">Vehicles — pick a target</Label>
+          <div className="flex flex-wrap gap-1">
+            {vehicleIds.length === 0 && <span className="text-muted-foreground text-xs">none connected</span>}
+            {vehicleIds.map((id) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={selectedId === id ? 'default' : 'outline'}
+                onClick={() => useUiStore.getState().setSelected(id)}
+              >
+                {id}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         <div className="flex flex-col gap-2">
           <Label className="text-muted-foreground text-xs">HSA — heading / speed / alt</Label>
           <Input type="number" placeholder="heading °" value={heading} onChange={(e) => setHeading(e.target.value)} />
