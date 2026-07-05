@@ -95,6 +95,9 @@ type VehicleTrack = { vehicleId: string; points: TimedPoint[] };
 | **8** | Dockerize the autonomy computer | single api container *vs separate autonomy container over a bus* · web on host *vs containerized (WSL2 HMR)* | `docker compose up` → api streams · host web flies & commands · edit `.py` → hot reload |
 | | **▸ Milestone 3 — 3D & shadcn UI polish** *(also amends Phases 1 · 4 · 5)* | | |
 | **9** | UI foundation (Tailwind + shadcn/ui) | shadcn copy-in *vs packaged lib (MUI)* · Tailwind *vs CSS modules* · **prereq for 4 & 5's shadcn UI** | tailwind builds · a shadcn component renders · `CommandPanel` re-skinned · hot path untouched |
+| | **▸ Milestone 4 — multi-vehicle / distributed GCS** | | |
+| **10** | Multi-vehicle gateway (fan-in aggregator) | gateway fan-in *vs client opens N sockets* · producers **dial** gateway (self-register) *vs gateway dials a config list* · reuse telemetry/command contract + thin `register` frame · env start-pose | 2–3 vehicles (each its own container) fly via **one** client socket · kill a container → its plane leaves |
+| **11** | Fleet control (per-vehicle command + runtime spawn) | command targets the **selected** vehicle *vs a target dropdown* · ack keyed by vehicleId · runtime "new vehicle" = a **sim task** that registers *vs a container per click (`docker.sock`)* | click a plane → command just it · "Add vehicle" spawns one live · producer drop prunes it |
 
 ---
 
@@ -438,3 +441,107 @@ A visual/UX layer on top of the working autonomy stack. Three of the four additi
 - **Done when:** Tailwind builds, a shadcn `Button`/`Input` renders, `CommandPanel`
   is re-skinned with shadcn, `tsc`/build is clean, and the rAF hot path is untouched.
 - **Commits:** `chore: tailwind + shadcn/ui init` · `refactor: command panel → shadcn`
+
+---
+
+## Milestone 4 — Multi-vehicle / distributed GCS
+
+Phases 0–9 fly **one** vehicle over **one** WebSocket. A real ground station watches
+a **fleet**, and each vehicle is its own machine. This milestone makes that jump —
+the same shape as a real GCS: many autonomy computers, one operator link.
+
+The client was built fleet-ready from the start (`SnapshotMsg.vehicles` is a *list*,
+`CommandMsg` carries a `vehicleId`, the track store keys everything by `vehicleId`,
+the layer factory renders a *list* of aircraft). So the render half is already done —
+the work is the **backend topology** and a little **command routing**.
+
+**The chosen shape — a gateway/aggregator (Option B).** A new **gateway** container
+owns the client's `/ws` (unchanged contract). Each vehicle is a separate **producer**
+container that **dials the gateway** over an internal `/ingest` link, registers itself,
+streams telemetry, and applies the commands routed back to it. The gateway keeps a
+registry `{vehicleId → producer}`, fans telemetry **down** to all clients, routes
+commands **up** by `vehicleId`, and prunes a vehicle when its producer disconnects.
+
+Rejected topologies (defend these out loud):
+
+- **Client opens N sockets (peer containers, Option A)** → cheapest, backend nearly
+  free, but the client grows a connection manager + must know every endpoint; doesn't
+  scale to a dynamic fleet without discovery. The gateway keeps the client on **one**
+  link and unchanged.
+- **Message broker — Redis/MQTT (Option C)** → the scale answer (N producers, M
+  independent consumers, durable/replayable streams). Overkill for a handful of
+  vehicles; the gateway's fan-in is *exactly* where a broker slots in later, so this
+  stays a whiteboard answer, not a container to babysit.
+
+> **"Vehicle" ≠ "container."** The distributed lesson lives in the gateway's **dynamic
+> registration** — producers self-register on connect, get pruned on disconnect — not
+> in how many Docker containers exist. That's what makes runtime spawn (Phase 11) a
+> *sim task* that dials the gateway, not a container spun up per click.
+
+### Phase 10 — Multi-vehicle gateway (fan-in aggregator)
+
+- **Slice:** a new `apps/gateway/` FastAPI service that owns the client `/ws` and an
+  internal `/ingest` WS for producers; refactor `apps/api/` from a `/ws` **server**
+  into a gateway **producer** that dials `/ingest`, registers, and streams; env-drive
+  each producer's `vehicleId` + start pose so vehicles are visually distinct; a
+  `docker-compose.yml` that runs the gateway + 2–3 producer containers.
+- **Seed question (you draft first):** *The client already keys telemetry, trails, and
+  aircraft by `vehicleId` — so why isn't a second vehicle "free"? What has to exist on
+  the **backend** for two separate containers' telemetry to reach one map, and for a
+  command to reach the **right** vehicle? Why make each producer **dial** the gateway
+  rather than the gateway dial each vehicle?*
+- **Key decisions → alternative rejected:**
+  - **Gateway fan-in** (one client `/ws`, N producers behind it) *vs the client opening
+    N sockets* → one operator link, client essentially unchanged, scales to a dynamic
+    fleet; costs a new component + an internal protocol.
+  - **Producers dial the gateway and self-register** *vs the gateway dialing each
+    vehicle from a config list* → membership is dynamic with no address config, and
+    runtime-spawned sims (Phase 11) join the same way; gateway-dials needs a discovery
+    step and a static list.
+  - **Reuse `TelemetryMsg`/`CommandMsg` on the internal link + one thin `register`
+    frame** *vs a distinct internal protocol* → one contract end-to-end; registration
+    (vehicleId, characteristics, start pose) is the only new frame.
+  - **Env-parameterized start pose per producer** *vs the hardcoded RWY01/CENTER
+    constants* → today both sims spawn on the same runway and fly the same orbit; a
+    fleet must be visually distinct (staggered runways/altitudes/loiter centers).
+  - **Prune a vehicle when its producer disconnects** *vs leaving ghosts* → a killed
+    container must remove its plane + trail from every client.
+- **Done when:** `docker compose up` runs a gateway + 2–3 producer containers; the
+  client (one socket) shows 2–3 distinct aircraft flying; killing one producer
+  container removes exactly that plane; the wire contract to the client is unchanged.
+- **Commits:** `feat: internal vehicle↔gateway protocol (register + relay frames)` ·
+  `feat: gateway service (fan-in + fan-out router)` ·
+  `refactor: api becomes a gateway producer (dials /ingest)` ·
+  `feat: parameterized start pose + fleet in compose (2–3 vehicles)`
+
+### Phase 11 — Fleet control (per-vehicle command + runtime spawn)
+
+- **Slice:** teach the client the live **roster** (so it can target a vehicle and drop
+  departed ones); route commands to the **selected** vehicle and key acks per vehicle;
+  add **runtime spawn/despawn** — a sim-host `POST/DELETE /vehicles` that starts/stops a
+  `VehicleSim` which dials the gateway, plus a panel control to add/remove a vehicle.
+- **Seed question (you draft first):** *With one global `activeSocket` and one
+  `lastAck`, what breaks when a command could go to any of three vehicles? Why reuse the
+  map's `selectedId` as the command target instead of a separate dropdown? And why is
+  runtime "add a vehicle" a new **sim process that registers** rather than a new Docker
+  **container** — what would the container path cost?*
+- **Key decisions → alternative rejected:**
+  - **Command targets the selected vehicle** (reuse `selectedId` from click-to-select)
+    *vs a separate target dropdown* → the map already has one selection model; commands
+    and the HUD card share it.
+  - **Ack keyed by vehicleId** *vs one global `lastAck`* → with N vehicles a single ack
+    slot is ambiguous about *which* vehicle accepted/rejected.
+  - **Runtime "new vehicle" = a sim task/process that dials the gateway** *vs a Docker
+    container spun up per click* → per-click containers need the app to drive the Docker
+    daemon (`docker.sock` / DinD) — privilege + orchestration overkill; dynamic
+    registration already gives the distributed behavior without it.
+  - **Roster/join-leave signal to the client** *vs inferring the fleet from telemetry
+    arrival + a staleness timeout* → an explicit roster removes a vehicle immediately
+    and cleanly, rather than waiting for a timeout heuristic.
+- **Done when:** clicking an aircraft targets commands + fills the HUD card for *that*
+  vehicle; "Add vehicle" makes a new plane appear and fly within a second; removing it
+  (or dropping its producer) prunes it from the map and roster; acks land on the right
+  vehicle.
+- **Commits:** `feat: roster message + client fleet awareness (prune on departure)` ·
+  `feat: command targeting by selected vehicle` ·
+  `feat: spawn/despawn vehicle from the panel (runtime fleet)`
