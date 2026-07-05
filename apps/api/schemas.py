@@ -139,3 +139,23 @@ class CommandMsg(BaseModel):
 # What a client may send up. A one-member union for now, kept in the discriminated
 # style so more uplink types slot in later without changing the parse site.
 ClientMessage = CommandMsg
+
+
+# --- internal vehicle <-> gateway link (/ingest), Milestone 4 Phase 10 ---
+# A producer (one vehicle) dials the gateway and speaks THIS contract, not the
+# browser-facing one. The frames are deliberately reused from above; the only new
+# type is `register`, the identity handshake a producer sends first.
+class RegisterMsg(BaseModel):
+    type: Literal["register"] = "register"
+    ts: int
+    vehicle: VehicleState  # initial pose; the gateway keys its registry off vehicle.vehicleId
+
+
+# Producer -> gateway (UP). Producers only ever emit these three; mission/snapshot/
+# replay/event are the gateway's job downstream, never a producer's. Distinct `type`
+# literals let pydantic route by discriminator, same as ServerMessage.
+IngestMessage = Annotated[
+    Union[RegisterMsg, TelemetryMsg, CommandAckMsg],
+    Field(discriminator="type"),
+]
+# Gateway -> producer (DOWN) is just a routed CommandMsg — no new type needed.
