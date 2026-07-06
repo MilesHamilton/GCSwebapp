@@ -1,6 +1,6 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useEffect } from 'react'
-import { Map, Source, Layer, useControl, useMap, type MapLayerMouseEvent } from 'react-map-gl/mapbox'
+import { Map, Source, Layer, useControl, useMap, type MapMouseEvent } from 'react-map-gl/mapbox'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { useTrackStore, type TimedPoint, type Vehicle } from '../state/trackStore'
 import { usePlaybackStore } from '../state/playbackStore'
@@ -141,7 +141,7 @@ function DeckLayers() {
 
 // While the mission editor is active, a map click drops a waypoint — but only inside a
 // geozone. Read stores imperatively so this doesn't subscribe MapView to the hot path.
-function handleMapClick(e: MapLayerMouseEvent): void {
+function handleMapClick(e: MapMouseEvent): void {
   const mission = useMissionStore.getState()
   if (!mission.editing) return
   const point: [number, number] = [e.lngLat.lng, e.lngLat.lat]
