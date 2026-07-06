@@ -35,6 +35,7 @@ LOITER_DIR = -1  # -1 = CCW, +1 = CW
 K_RADIUS = 1.0  # radius-capture gain: how hard we steer back onto the ring
 RACETRACK_SEG_M = 25.0  # racetrack polyline resolution
 RACETRACK_LOOKAHEAD_M = 120.0  # pure-pursuit carrot distance ahead on the path
+WP_CAPTURE_M = 150.0  # waypoint hit radius: within this, advance to the next waypoint
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -133,6 +134,9 @@ class VehicleSim:
         self.tgt_alt_m = self.alt_m
         # --- racetrack path, [lng,lat] polyline (built when a racetrack command lands) ---
         self.rt_path: list[list[float]] = []
+        # --- waypoint mission: operator-placed 3D route, flown in order and looped ---
+        self.wp_path: list[Position] = []
+        self.wp_index = 0
 
     # ---- command intake: validate against the envelope, then set mode + setpoints ----
     def apply(self, command: Command) -> tuple[bool, str | None]:
@@ -174,6 +178,18 @@ class VehicleSim:
                 self.tgt_alt_m = command.altM
             return True, None
 
+        if command.kind == "mission":
+            if len(command.waypoints) < 2:
+                return False, "mission needs at least 2 waypoints"
+            for wp in command.waypoints:
+                if not (0.0 <= wp.altM <= self.veh.service_ceiling_m):
+                    return False, f"waypoint altitude {wp.altM:.0f} outside [0, {self.veh.service_ceiling_m:.0f}] m"
+            self.mode = "WAYPOINT"
+            self.wp_path = list(command.waypoints)
+            self.wp_index = 0
+            self.tgt_alt_m = command.waypoints[0].altM
+            return True, None
+
         # loiter: resolve "keep current" fields, validate, THEN commit (never half-apply)
         center_lng = command.centerLng if command.centerLng is not None else self.lng
         center_lat = command.centerLat if command.centerLat is not None else self.lat
@@ -209,6 +225,8 @@ class VehicleSim:
         HSA holds a fixed commanded heading; LOITER regenerates it each tick (the tangent)."""
         if self.mode == "RACETRACK":
             return self._racetrack_heading()
+        if self.mode == "WAYPOINT":
+            return self._waypoint_heading()
         if self.mode == "LOITER":
             return self._loiter_heading()
         return self.tgt_heading_deg
@@ -227,6 +245,22 @@ class VehicleSim:
         lookahead = max(1, round(RACETRACK_LOOKAHEAD_M / RACETRACK_SEG_M))
         carrot = path[(best_i + lookahead) % len(path)]
         north, east = _offsets_m(self.lat, self.lng, carrot[1], carrot[0])
+        return math.degrees(math.atan2(east, north)) % 360.0
+
+    def _waypoint_heading(self) -> float:
+        """Steer straight at the current waypoint; when captured (within WP_CAPTURE_M),
+        advance to the next one, looping back to the first at the end of the route. Also
+        sets the altitude target to the active waypoint so the craft flies the 3D path."""
+        path = self.wp_path
+        if not path:
+            return self.heading_deg
+        tgt = path[self.wp_index]
+        north, east = _offsets_m(self.lat, self.lng, tgt.lat, tgt.lng)
+        if math.hypot(north, east) < WP_CAPTURE_M and len(path) > 1:
+            self.wp_index = (self.wp_index + 1) % len(path)
+            tgt = path[self.wp_index]
+            north, east = _offsets_m(self.lat, self.lng, tgt.lat, tgt.lng)
+        self.tgt_alt_m = tgt.altM
         return math.degrees(math.atan2(east, north)) % 360.0
 
     def _loiter_heading(self) -> float:

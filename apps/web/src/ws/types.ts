@@ -69,5 +69,6 @@ export type RacetrackCommand = {
   direction?: 'cw' | 'ccw' | null
   altM?: number | null
 }
-export type Command = HsaCommand | LoiterCommand | RacetrackCommand
+export type MissionCommand = { kind: 'mission'; waypoints: Position[] }
+export type Command = HsaCommand | LoiterCommand | RacetrackCommand | MissionCommand
 export type CommandMsg = { type: 'command'; ts: number; vehicleId?: string; commandId: string; command: Command }

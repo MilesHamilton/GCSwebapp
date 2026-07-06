@@ -134,7 +134,16 @@ class RacetrackCommand(BaseModel):
     altM: float | None = None
 
 
-Command = Annotated[Union[HsaCommand, LoiterCommand, RacetrackCommand], Field(discriminator="kind")]
+class MissionCommand(BaseModel):
+    # Operator-placed 3D route: fly through the waypoints in order, looping. Each waypoint
+    # carries its own altitude (Position.altM), so the aircraft climbs/descends along the path.
+    kind: Literal["mission"] = "mission"
+    waypoints: list[Position] = []
+
+
+Command = Annotated[
+    Union[HsaCommand, LoiterCommand, RacetrackCommand, MissionCommand], Field(discriminator="kind")
+]
 
 
 class CommandMsg(BaseModel):

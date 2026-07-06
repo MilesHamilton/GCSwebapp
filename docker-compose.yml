@@ -44,27 +44,27 @@ services:
     environment:
       - VEHICLE_ID=uav-01
 
-  uav-02:
+  uav-02: # KDCA RWY 15 threshold (NW end of the 15/33 runway), departs to the SE
     <<: *producer
     environment:
       - VEHICLE_ID=uav-02
-      - START_LAT=38.87
-      - START_LNG=-77.00
-      - START_HEADING_DEG=270
+      - START_LAT=38.8555
+      - START_LNG=-77.0399
+      - START_HEADING_DEG=150
       - START_ALT_M=900
-      - LOITER_LAT=38.87
-      - LOITER_LNG=-77.02
+      - LOITER_LAT=38.855
+      - LOITER_LNG=-77.030
 
-  uav-03:
+  uav-03: # KDCA RWY 04 threshold (SW end of the 4/22 runway), departs to the NE
     <<: *producer
     environment:
       - VEHICLE_ID=uav-03
-      - START_LAT=38.82
-      - START_LNG=-77.06
-      - START_HEADING_DEG=45
+      - START_LAT=38.8429
+      - START_LNG=-77.0445
+      - START_HEADING_DEG=40
       - START_ALT_M=1300
-      - LOITER_LAT=38.83
-      - LOITER_LNG=-77.05
+      - LOITER_LAT=38.848
+      - LOITER_LNG=-77.050
 
   # Opt-in containerized web (mainly for a clone-and-run demo, not day-to-day dev):
   #   docker compose --profile full-container up

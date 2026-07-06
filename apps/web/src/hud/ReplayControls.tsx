@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useTrackStore } from '../state/trackStore'
 import { usePlaybackStore } from '../state/playbackStore'
+import { useMissionStore } from '../state/missionStore'
 import { Button } from '@/components/ui/button'
-import { Slider } from '@/components/ui/slider'
+import { Timeline } from '@/components/ui/timeline'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { computeTimelineEvents } from '../lib/timelineEvents'
 
 // [start, end] epoch-ms across all recorded vehicles (needs >= 2 distinct times).
 function recordingBounds(recording: Record<string, { timestamp: number }[]>): [number, number] | null {
@@ -82,6 +84,13 @@ export default function ReplayControls() {
   const elapsed = bounds ? Math.max(0, currentTime - bounds[0]) : 0
   const total = bounds ? bounds[1] - bounds[0] : 0
 
+  // Recompute markers only when a recording finalizes (bounds set on Stop). Reads the
+  // hot-lane recording imperatively so telemetry ticks don't re-render this panel.
+  const events = useMemo(() => {
+    const track = useTrackStore.getState()
+    return computeTimelineEvents(track.recording, track.geozones, useMissionStore.getState().paths, bounds)
+  }, [bounds])
+
   return (
     <Card className="absolute bottom-3 left-1/2 z-10 w-[420px] -translate-x-1/2 gap-2 py-2">
       <CardContent className="gap-2 px-3">
@@ -117,16 +126,16 @@ export default function ReplayControls() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Slider
+          <Timeline
             min={bounds ? bounds[0] : 0}
             max={bounds ? bounds[1] : 1}
-            value={[bounds ? currentTime : 0]}
-            step={100}
+            value={bounds ? currentTime : 0}
+            events={events}
             disabled={mode !== 'replay' || !bounds}
-            onValueChange={(v) => {
+            onValueChange={(t) => {
               const pb = usePlaybackStore.getState()
               pb.pause()
-              pb.setCurrentTime(v[0])
+              pb.setCurrentTime(t)
             }}
           />
           <Badge variant="secondary" className="tabular-nums whitespace-nowrap">

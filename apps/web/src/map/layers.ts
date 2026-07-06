@@ -1,9 +1,10 @@
-import { PolygonLayer } from '@deck.gl/layers'
+import { PolygonLayer, PathLayer, ScatterplotLayer } from '@deck.gl/layers'
 import { TripsLayer } from '@deck.gl/geo-layers'
 import { SimpleMeshLayer } from '@deck.gl/mesh-layers'
 import { OBJLoader } from '@loaders.gl/obj'
 import type { Color, PickingInfo } from '@deck.gl/core'
 import type { Vehicle, TimedPoint, Geozone } from '../state/trackStore'
+import type { Waypoint } from '../state/missionStore'
 
 // A render frame: the already-resolved world to draw (live OR replay), plus the trail
 // cursor and cold-lane HUD state. buildLayers stays a pure state->layers function;
@@ -13,7 +14,11 @@ export type RenderFrame = {
   vehicles: Vehicle[]
   trails: Trail[]
   geozones: Geozone[]
+  // Per-vehicle 3D mission routes (markers + polyline). The selected vehicle's path is
+  // drawn bright; the rest dimmed.
+  waypointPaths: { id: string; waypoints: Waypoint[]; selected: boolean }[]
   currentTime: number // epoch ms; TripsLayer reveals each trail up to here
+  zoom: number // map zoom; below GEOZONE_EXTRUDE_MIN_ZOOM the zone flattens to a 2D outline
   showGeozones: boolean // geozones = the one global visibility toggle
   hiddenVehicles: Record<string, boolean> // per-vehicle hide: drops that craft's mesh + trail
   selectedId: string | null
@@ -32,7 +37,12 @@ const HEADING_OFFSET = 270
 
 const TRAIL_COLOR: Color = [57, 208, 255, 220]
 const ZONE_LINE: Color = [255, 80, 80, 220]
+const WP_COLOR: Color = [255, 209, 102, 230] // selected vehicle's mission (amber, like a selected craft)
+const WP_COLOR_DIM: Color = [255, 209, 102, 90] // other vehicles' missions, dimmed
 const GEOZONE_HEIGHT_M = 2000 // extrude the zone into a floor->2 km airspace cage
+// Below this zoom the 2 km cage detaches from the terrain and reads as a floating box,
+// so we drop the extrusion and draw a flat ground outline instead.
+const GEOZONE_EXTRUDE_MIN_ZOOM = 11
 
 // TripsLayer stores timestamps as float32, which loses precision on raw epoch-ms
 // (~1.7e12). Normalize to a small base per frame so the trail renders cleanly.
@@ -48,6 +58,10 @@ export function buildLayers(frame: RenderFrame) {
   for (const t of trails) for (const p of t.points) if (p.timestamp < base) base = p.timestamp
   if (!Number.isFinite(base)) base = 0
 
+  // Zoomed in: extruded wireframe cage (a 3D airspace volume). Zoomed out: the cage floats
+  // off the terrain as a box, so collapse to a flat ground outline.
+  const extruded = frame.zoom >= GEOZONE_EXTRUDE_MIN_ZOOM
+
   return [
     new PolygonLayer<Geozone>({
       id: 'geozones',
@@ -57,7 +71,7 @@ export function buildLayers(frame: RenderFrame) {
       // A restricted area has vertical extent — render it as an extruded WIREFRAME cage
       // (no filled walls). That reads as a 3D airspace volume with no translucent faces
       // to occlude the craft or z-fight in interleaved mode (the earlier side effect).
-      extruded: true,
+      extruded,
       getElevation: GEOZONE_HEIGHT_M,
       filled: false,
       wireframe: true,
@@ -81,6 +95,30 @@ export function buildLayers(frame: RenderFrame) {
       fadeTrail: false,
       capRounded: true,
       jointRounded: true,
+    }),
+    // Mission routes: one polyline per vehicle, through its waypoints at their altitudes...
+    new PathLayer<{ id: string; waypoints: Waypoint[]; selected: boolean }>({
+      id: 'mission-paths',
+      data: frame.waypointPaths.filter((p) => p.waypoints.length >= 2),
+      getPath: (d) => d.waypoints.map((w): [number, number, number] => [w.lng, w.lat, w.altM]),
+      getColor: (d) => (d.selected ? WP_COLOR : WP_COLOR_DIM),
+      getWidth: (d) => (d.selected ? 2 : 1.5),
+      widthUnits: 'pixels',
+      updateTriggers: { getColor: frame.selectedId, getWidth: frame.selectedId },
+    }),
+    // ...and a marker at each waypoint (drawn at its 3D position).
+    new ScatterplotLayer<Waypoint & { selected: boolean }>({
+      id: 'mission-waypoints',
+      data: frame.waypointPaths.flatMap((p) => p.waypoints.map((w) => ({ ...w, selected: p.selected }))),
+      getPosition: (w): [number, number, number] => [w.lng, w.lat, w.altM],
+      getFillColor: (w) => (w.selected ? WP_COLOR : WP_COLOR_DIM),
+      getRadius: (w) => (w.selected ? 6 : 4),
+      radiusUnits: 'pixels',
+      stroked: true,
+      getLineColor: [20, 24, 32, 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 1,
+      updateTriggers: { getFillColor: frame.selectedId, getRadius: frame.selectedId },
     }),
     new SimpleMeshLayer<Vehicle>({
       id: 'aircraft',

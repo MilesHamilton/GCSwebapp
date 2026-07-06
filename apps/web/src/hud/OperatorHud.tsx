@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 // 5 Hz: sample the hot store at human-refresh rate rather than subscribing to every
-// telemetry tick — that's how live telemetry reaches React without dragging the hot
+// telemetry tick. That's how live telemetry reaches React without dragging the hot
 // path (10 Hz data / 60 fps draw) back through the render cycle.
 const SAMPLE_MS = 200
 
@@ -33,7 +33,7 @@ export default function OperatorHud() {
   const hidden = useUiStore((s) => s.hiddenVehicles)
   const selectedId = useUiStore((s) => s.selectedVehicleId)
   // Roster for the fleet list. Shallow-compare the id LIST so this re-renders only on
-  // join/leave — not on every 10 Hz telemetry tick (keeps the hot path off React).
+  // join/leave, not on every 10 Hz telemetry tick (keeps the hot path off React).
   const vehicleIds = useTrackStore(useShallow((s) => Object.keys(s.vehicles).sort()))
   const v = useSampledVehicle(selectedId)
 
@@ -45,7 +45,7 @@ export default function OperatorHud() {
       </CardHeader>
       <CardContent className="gap-3 px-3">
         <div className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">Fleet — select · show/hide</span>
+          <span className="text-muted-foreground text-xs">Fleet: select · show/hide</span>
           {vehicleIds.length === 0 && <span className="text-muted-foreground text-xs">no vehicles</span>}
           {vehicleIds.map((id) => (
             <div key={id} className="flex items-center gap-1">
@@ -94,7 +94,7 @@ export default function OperatorHud() {
               <span className="text-muted-foreground">id</span>
               <span>{v.id}</span>
               <span className="text-muted-foreground">mode</span>
-              <span>{v.mode ?? '—'}</span>
+              <span>{v.mode ?? '--'}</span>
               <span className="text-muted-foreground">lng</span>
               <span>{v.position[0].toFixed(4)}</span>
               <span className="text-muted-foreground">lat</span>

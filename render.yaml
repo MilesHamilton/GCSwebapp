@@ -53,18 +53,18 @@ services:
         value: uav-02
       - key: GATEWAY_URL
         value: ws://gcs-gateway:8000/ingest
-      - key: START_LAT
-        value: "38.87"
+      - key: START_LAT # KDCA RWY 15 threshold (NW end of 15/33)
+        value: "38.8555"
       - key: START_LNG
-        value: "-77.00"
+        value: "-77.0399"
       - key: START_HEADING_DEG
-        value: "270"
+        value: "150"
       - key: START_ALT_M
         value: "900"
       - key: LOITER_LAT
-        value: "38.87"
+        value: "38.855"
       - key: LOITER_LNG
-        value: "-77.02"
+        value: "-77.030"
 
   - type: pserv
     name: uav-03
@@ -79,18 +79,18 @@ services:
         value: uav-03
       - key: GATEWAY_URL
         value: ws://gcs-gateway:8000/ingest
-      - key: START_LAT
-        value: "38.82"
+      - key: START_LAT # KDCA RWY 04 threshold (SW end of 4/22)
+        value: "38.8429"
       - key: START_LNG
-        value: "-77.06"
+        value: "-77.0445"
       - key: START_HEADING_DEG
-        value: "45"
+        value: "40"
       - key: START_ALT_M
         value: "1300"
       - key: LOITER_LAT
-        value: "38.83"
+        value: "38.848"
       - key: LOITER_LNG
-        value: "-77.05"
+        value: "-77.050"
 
   - type: web
     name: gcs-web

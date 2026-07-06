@@ -1,10 +1,12 @@
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useEffect } from 'react'
-import { Map, Source, Layer, useControl, useMap } from 'react-map-gl/mapbox'
+import { Map, Source, Layer, useControl, useMap, type MapLayerMouseEvent } from 'react-map-gl/mapbox'
 import { MapboxOverlay } from '@deck.gl/mapbox'
 import { useTrackStore, type TimedPoint, type Vehicle } from '../state/trackStore'
 import { usePlaybackStore } from '../state/playbackStore'
 import { useUiStore } from '../state/uiStore'
+import { useMissionStore } from '../state/missionStore'
+import { pointInAnyGeozone } from '../lib/geo'
 import { buildLayers, type RenderFrame, type Trail } from './layers'
 import { startWsClient } from '../ws/client'
 
@@ -67,12 +69,19 @@ function sampleAt(id: string, points: TimedPoint[], t: number): Vehicle | null {
 }
 
 // Resolve the frame to draw from the stores, imperatively (no React subscription).
-function resolveFrame(): RenderFrame {
+function resolveFrame(zoom: number): RenderFrame {
   const track = useTrackStore.getState()
   const pb = usePlaybackStore.getState()
   const ui = useUiStore.getState()
+  // Draw every vehicle's stored path; the selected one (default uav-01) renders bright.
+  const selectedKey = ui.selectedVehicleId ?? 'uav-01'
+  const waypointPaths = Object.entries(useMissionStore.getState().paths)
+    .filter(([, wps]) => wps.length > 0)
+    .map(([id, wps]) => ({ id, waypoints: wps, selected: id === selectedKey }))
   const shared = {
     geozones: track.geozones,
+    waypointPaths,
+    zoom,
     showGeozones: ui.showGeozones,
     hiddenVehicles: ui.hiddenVehicles,
     selectedId: ui.selectedVehicleId,
@@ -109,7 +118,8 @@ function DeckLayers() {
     const stop = startWsClient()
     let raf = 0
     const tick = () => {
-      const frame = resolveFrame()
+      const zoom = maps.current?.getZoom() ?? INITIAL_VIEW_STATE.zoom
+      const frame = resolveFrame(zoom)
       overlay.setProps({ layers: buildLayers(frame) })
       // Camera follow: drive the map imperatively (off React), per the Phase 5 decision.
       const ui = useUiStore.getState()
@@ -129,6 +139,21 @@ function DeckLayers() {
   return null
 }
 
+// While the mission editor is active, a map click drops a waypoint — but only inside a
+// geozone. Read stores imperatively so this doesn't subscribe MapView to the hot path.
+function handleMapClick(e: MapLayerMouseEvent): void {
+  const mission = useMissionStore.getState()
+  if (!mission.editing) return
+  const point: [number, number] = [e.lngLat.lng, e.lngLat.lat]
+  if (!pointInAnyGeozone(point, useTrackStore.getState().geozones)) {
+    mission.warn('Waypoint must be inside a geozone')
+    return
+  }
+  // Waypoints belong to the selected vehicle (default uav-01 when none selected).
+  const id = useUiStore.getState().selectedVehicleId ?? 'uav-01'
+  mission.addWaypoint(id, point[0], point[1])
+}
+
 export default function MapView() {
   if (!MAPBOX_TOKEN) {
     return (
@@ -146,6 +171,7 @@ export default function MapView() {
       mapStyle="mapbox://styles/mapbox/dark-v11"
       maxPitch={80}
       terrain={{ source: 'mapbox-dem', exaggeration: 1.4 }}
+      onClick={handleMapClick}
       style={{ width: '100vw', height: '100vh' }}
     >
       {/* DEM feeds the `terrain` prop above (relief) and the sky layer's horizon. */}
