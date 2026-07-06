@@ -100,13 +100,13 @@ services:
     dockerfilePath: ./apps/web/Dockerfile
     dockerContext: ./apps/web
     envVars:
-      # Build args (Vite bakes these into the bundle). VITE_GATEWAY_HOST is the gateway's
-      # public hostname; the client speaks wss://<host>/ws.
-      - key: VITE_GATEWAY_HOST
-        fromService:
-          type: web
-          name: gcs-gateway
-          property: host
+      # Build args (Vite bakes these into the bundle). NOTE: fromService `host` returns
+      # the gateway's PRIVATE hostname (gcs-gateway), which the browser can't resolve, and
+      # Render has no fromService property for a service's public .onrender.com URL. So set
+      # the full public WS URL by hand after the gateway is up, then rebuild gcs-web:
+      #   VITE_WS_URL = wss://<gcs-gateway public host>.onrender.com/ws
+      - key: VITE_WS_URL
+        sync: false
       - key: VITE_MAPBOX_TOKEN
         sync: false # public pk.* token, entered in dashboard
       # Runtime: nginx Basic Auth front door (entrypoint fails closed if unset).

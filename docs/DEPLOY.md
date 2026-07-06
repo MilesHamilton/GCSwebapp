@@ -26,8 +26,15 @@ service-to-service DNS only work within a region.
 3. Before the first deploy, set the secret env vars (marked `sync:false`) on **`gcs-web`**:
    - `VITE_MAPBOX_TOKEN` — your public `pk.*` Mapbox token.
    - `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` — the login for the app's front door.
-4. Apply. Render builds all five services and wires `VITE_GATEWAY_HOST` from the
-   gateway's public host automatically.
+4. Apply. Render builds all five services.
+5. **Wire the gateway URL into the web build.** Once `gcs-gateway` is up, copy its public
+   URL (top of the service page) and set on `gcs-web`:
+   - `VITE_WS_URL = wss://<gcs-gateway host>.onrender.com/ws`
+
+   Then redeploy `gcs-web` with **Clear build cache & deploy** (Vite bakes this at build
+   time). This can't be auto-wired: `fromService` only exposes a service's *private*
+   host (`gcs-gateway`), which the browser can't resolve — there's no property for the
+   public `.onrender.com` URL.
 
 ## Verify
 
