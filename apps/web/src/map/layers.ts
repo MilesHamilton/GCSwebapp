@@ -18,7 +18,7 @@ export type RenderFrame = {
   // drawn bright; the rest dimmed.
   waypointPaths: { id: string; waypoints: Waypoint[]; selected: boolean }[]
   currentTime: number // epoch ms; TripsLayer reveals each trail up to here
-  zoom: number // map zoom; below LOW_ZOOM_THRESHOLD everything with altitude ground-locks
+  zoom: number // map zoom; below LOW_ZOOM_THRESHOLD the geozone hides and trails/routes ground-lock
   showGeozones: boolean // geozones = the one global visibility toggle
   hiddenVehicles: Record<string, boolean> // per-vehicle hide: drops that craft's mesh + trail
   selectedId: string | null
@@ -45,11 +45,11 @@ const WP_WALL_HALF_WIDTH_M = 12 // wall width, so it reads as a plane rather tha
 const M_PER_DEG_LAT = 111_320
 const GEOZONE_HEIGHT_M = 2000 // extrude the zone into a floor->2 km airspace cage
 // Below this zoom, real flight altitude (hundreds to low thousands of metres) reads as
-// detached from the terrain — a floating cage, a trail smeared across the sky, a waypoint
-// marker hovering with no visible ground contact. There's no fix for that within a single
-// frame; instead every altitude-bearing layer collapses toward the ground below this zoom
-// (the geozone cage flattens to its outline, trails/mission routes project to their ground
-// track), and re-inflates once close enough that the vertical extent reads correctly again.
+// detached from the terrain — a trail smeared across the sky, a waypoint marker hovering
+// with no visible ground contact — so trails/mission routes project to their ground track.
+// The geozone is handled differently: at this zoom its real ~10 km footprint dominates the
+// viewport regardless of shape (extruded or flat), so it's hidden outright rather than
+// flattened. Everything reappears/re-inflates once zoomed in past this threshold.
 const LOW_ZOOM_THRESHOLD = 11
 
 // TripsLayer stores timestamps as float32, which loses precision on raw epoch-ms
@@ -60,18 +60,20 @@ const TRAIL_WINDOW_MS = 1_000_000_000 // effectively unbounded: show the whole p
 // selected one — the shared shape behind the wall/marker/label layers below.
 type WpItem = Waypoint & { index: number; selected: boolean }
 
-// A thin vertical quad from the ground up to `altM`, so the waypoint's altitude reads
-// clearly against the terrain. Not a camera-facing billboard (deck has no primitive for
-// that outside TextLayer/IconLayer) — a fixed diagonal plane, which looks right from most
-// orbit angles. At altM=0 (ground-locked, low zoom) it degenerates to a zero-height sliver.
-function wallQuad(w: Waypoint, altM: number): [number, number, number][] {
+// A small ground footprint around the waypoint, extruded up to its altitude by
+// PolygonLayer's own `extruded`/`getElevation` mechanism (the same technique the geozone
+// cage uses). A hand-built vertical quad does NOT work here: PolygonLayer triangulates
+// with earcut in the XY (lng/lat) plane only, then lifts each vertex by Z afterward — a
+// quad whose "top" and "bottom" vertices share the same (lng,lat) has zero XY area, so
+// earcut silently produces no triangles at all (confirmed against the deck.gl source).
+function wallFootprint(w: Waypoint): [number, number][] {
   const dLat = WP_WALL_HALF_WIDTH_M / M_PER_DEG_LAT
   const dLng = WP_WALL_HALF_WIDTH_M / (M_PER_DEG_LAT * Math.cos((w.lat * Math.PI) / 180))
   return [
-    [w.lng - dLng, w.lat - dLat, 0],
-    [w.lng - dLng, w.lat - dLat, altM],
-    [w.lng + dLng, w.lat + dLat, altM],
-    [w.lng + dLng, w.lat + dLat, 0],
+    [w.lng - dLng, w.lat - dLat],
+    [w.lng + dLng, w.lat - dLat],
+    [w.lng + dLng, w.lat + dLat],
+    [w.lng - dLng, w.lat + dLat],
   ]
 }
 
@@ -85,10 +87,10 @@ export function buildLayers(frame: RenderFrame) {
   for (const t of trails) for (const p of t.points) if (p.timestamp < base) base = p.timestamp
   if (!Number.isFinite(base)) base = 0
 
-  // Zoomed in: extruded wireframe cage (a 3D airspace volume) and real-altitude trails/routes.
-  // Zoomed out: everything with vertical extent collapses toward the ground (see
-  // LOW_ZOOM_THRESHOLD above) so nothing reads as a disconnected floating shape.
-  const extruded = frame.zoom >= LOW_ZOOM_THRESHOLD
+  // Zoomed out: real-altitude trails/routes collapse to the ground (see LOW_ZOOM_THRESHOLD
+  // above); the geozone cage is simply hidden rather than flattened — at this zoom its real
+  // ~10 km footprint dominates the whole viewport like a giant enclosing box regardless of
+  // shape, so a flat outline doesn't actually fix the "looks wrong" complaint.
   const groundLock = frame.zoom < LOW_ZOOM_THRESHOLD
   const wpAlt = (altM: number) => (groundLock ? 0 : altM)
 
@@ -100,12 +102,12 @@ export function buildLayers(frame: RenderFrame) {
     new PolygonLayer<Geozone>({
       id: 'geozones',
       data: frame.geozones,
-      visible: frame.showGeozones,
+      visible: frame.showGeozones && !groundLock,
       getPolygon: (d) => d.polygon,
       // A restricted area has vertical extent — render it as an extruded WIREFRAME cage
       // (no filled walls). That reads as a 3D airspace volume with no translucent faces
       // to occlude the craft or z-fight in interleaved mode (the earlier side effect).
-      extruded,
+      extruded: true,
       getElevation: GEOZONE_HEIGHT_M,
       filled: false,
       wireframe: true,
@@ -134,17 +136,19 @@ export function buildLayers(frame: RenderFrame) {
       updateTriggers: { getPath: groundLock },
     }),
     // A semi-transparent ground-reference wall under each waypoint, for altitude visibility.
-    // Ground-locked, this degenerates to a zero-height sliver (both edges land at z=0).
+    // Ground-locked, elevation collapses to 0 and the extrusion disappears entirely.
     new PolygonLayer<WpItem>({
       id: 'mission-wp-walls',
       data: wpItems,
-      getPolygon: (w) => wallQuad(w, wpAlt(w.altM)),
-      extruded: false,
+      getPolygon: (w) => wallFootprint(w),
+      extruded: true,
+      getElevation: (w) => wpAlt(w.altM),
       filled: true,
       stroked: false,
+      wireframe: false,
       getFillColor: (w) => (w.selected ? WP_WALL_COLOR : WP_WALL_COLOR_DIM),
       parameters: { depthWriteEnabled: false },
-      updateTriggers: { getFillColor: frame.selectedId, getPolygon: groundLock },
+      updateTriggers: { getFillColor: frame.selectedId, getElevation: groundLock },
     }),
     // Mission routes: one polyline per vehicle, through its waypoints at their altitudes
     // (or their ground track, zoomed out)...
