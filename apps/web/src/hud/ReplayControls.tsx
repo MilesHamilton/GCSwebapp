@@ -88,7 +88,9 @@ export default function ReplayControls() {
   // hot-lane recording imperatively so telemetry ticks don't re-render this panel.
   const events = useMemo(() => {
     const track = useTrackStore.getState()
-    return computeTimelineEvents(track.recording, track.geozones, useMissionStore.getState().paths, bounds)
+    // sentPaths (not the live-editable paths) so clearing the on-screen draft before Stop
+    // can't erase the record of a route the vehicle actually flew during this recording.
+    return computeTimelineEvents(track.recording, track.geozones, useMissionStore.getState().sentPaths, bounds)
   }, [bounds])
 
   return (

@@ -1,9 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { sendCommand } from '../ws/client'
 import { useCommandStore } from '../state/commandStore'
 import { useUiStore } from '../state/uiStore'
 import { useTrackStore } from '../state/trackStore'
+import { useMissionStore, type Waypoint } from '../state/missionStore'
+import { metersBetween } from '../lib/geo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +20,16 @@ function Help({ children }: { children: ReactNode }) {
   return <span className="text-muted-foreground text-[10px] leading-tight">{children}</span>
 }
 
+type CommandType = 'hsa' | 'orbit' | 'waypoint'
+
+// A stable fallback reference: `s.paths[targetKey] ?? []` would otherwise return a NEW
+// array every selector call whenever the vehicle has no path yet, and zustand's
+// useSyncExternalStore compares snapshots by reference — a fresh array each render looks
+// like a change every time, forcing an infinite re-render loop.
+const EMPTY_WAYPOINTS: Waypoint[] = []
+
 export default function CommandPanel() {
+  const [cmdType, setCmdType] = useState<CommandType>('hsa')
   const [heading, setHeading] = useState('')
   const [speed, setSpeed] = useState('')
   const [altitude, setAltitude] = useState('')
@@ -42,6 +53,32 @@ export default function CommandPanel() {
   // Live roster for the selector. Shallow-compare the id LIST so this re-renders only when
   // a vehicle joins/leaves, not on every 10 Hz telemetry tick (keeps the hot path off React).
   const vehicleIds = useTrackStore(useShallow((s) => Object.keys(s.vehicles).sort()))
+
+  // Waypoint editor state: the path belongs to the selected vehicle (default uav-01).
+  const targetKey = selectedId ?? 'uav-01'
+  const editing = useMissionStore((s) => s.editing)
+  const waypoints = useMissionStore((s) => s.paths[targetKey] ?? EMPTY_WAYPOINTS)
+  const revision = useMissionStore((s) => s.revision)
+  const warning = useMissionStore((s) => s.warning)
+  // Broadcast targets the whole roster; fall back to the single target if none reported yet.
+  const targetIds = vehicleIds.length > 0 ? vehicleIds : [targetKey]
+
+  // Stepping away from Waypoint mode with map-click placement still armed would leave a
+  // stray, invisible "click to place" trap on the map with no way to see or turn it off.
+  useEffect(() => {
+    if (cmdType !== 'waypoint' && useMissionStore.getState().editing) {
+      useMissionStore.getState().setEditing(false)
+    }
+  }, [cmdType])
+
+  // Auto-clear the transient waypoint warning; keyed on nonce so a repeated message re-fires it.
+  const [warnText, setWarnText] = useState<string | null>(null)
+  useEffect(() => {
+    if (!warning) return
+    setWarnText(warning.text)
+    const t = setTimeout(() => setWarnText(null), 2500)
+    return () => clearTimeout(t)
+  }, [warning])
 
   // Empty OR non-numeric -> undefined, so a blank/typo cleanly means "leave unchanged"
   // (rather than sending NaN, which JSON turns into a silent null).
@@ -67,6 +104,54 @@ export default function CommandPanel() {
           },
           target,
         )
+
+  const missionCmd = (wps: typeof waypoints) => ({
+    kind: 'mission' as const,
+    waypoints: wps.map((w) => ({ lng: w.lng, lat: w.lat, altM: w.altM })),
+  })
+
+  const sendWaypoints = () => {
+    const mission = useMissionStore.getState()
+    if (broadcast) {
+      mission.setPathForAll(targetIds, waypoints) // every vehicle keeps its own copy
+      mission.markActive(targetIds, true)
+      mission.markSent(targetIds, waypoints) // survives a later Clear, for replay markers
+      sendCommand(missionCmd(waypoints), '*')
+    } else {
+      mission.markActive([targetKey], true)
+      mission.markSent([targetKey], waypoints)
+      sendCommand(missionCmd(waypoints), selectedId ?? undefined)
+    }
+  }
+
+  const clearWaypoints = () => {
+    const mission = useMissionStore.getState()
+    const active = mission.active
+    if (broadcast) {
+      const anyActive = targetIds.some((id) => active[id])
+      mission.clearPaths(targetIds)
+      // Only interrupt vehicles that were actually flying a route; loiter them in place.
+      if (anyActive) sendCommand({ kind: 'loiter' }, '*')
+    } else {
+      const wasActive = active[targetKey]
+      mission.clearPaths([targetKey])
+      if (wasActive) sendCommand({ kind: 'loiter' }, selectedId ?? undefined)
+    }
+  }
+
+  // Commit a waypoint's altitude on blur, not on every keystroke: the field is UNCONTROLLED
+  // (defaultValue, not value) so the browser owns the text while typing. A controlled input
+  // bound straight to a number can't represent "the box is empty" — clearing it to retype
+  // snaps back to 0 mid-edit and swallows keystrokes. Committing on blur, and only when the
+  // text parses to a finite number, avoids that and stops a bad edit from ever reaching deck.
+  const commitAlt = (index: number) => (e: React.FocusEvent<HTMLInputElement>) => {
+    const n = Number(e.target.value)
+    if (Number.isFinite(n)) {
+      useMissionStore.getState().updateAlt(targetKey, index, n)
+    } else {
+      e.target.value = String(waypoints[index]?.altM ?? '') // snap back to last-known-good
+    }
+  }
 
   return (
     <Card className="absolute top-3 left-3 z-10 w-56 gap-3 py-3">
@@ -108,8 +193,21 @@ export default function CommandPanel() {
 
         {!collapsed && (
         <>
+        <div className="flex flex-col gap-1">
+          <Label className="text-muted-foreground text-xs">Command type</Label>
+          <select
+            value={cmdType}
+            onChange={(e) => setCmdType(e.target.value as CommandType)}
+            className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-9 rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
+          >
+            <option value="hsa" className="bg-background text-foreground">HSA (heading / speed / alt)</option>
+            <option value="orbit" className="bg-background text-foreground">Loiter / Racetrack</option>
+            <option value="waypoint" className="bg-background text-foreground">Waypoint path</option>
+          </select>
+        </div>
+
+        {cmdType === 'hsa' && (
         <div className="flex flex-col gap-2">
-          <Label className="text-muted-foreground text-xs">HSA: heading / speed / alt</Label>
           <Input type="number" placeholder="heading °" value={heading} onChange={(e) => setHeading(e.target.value)} />
           <Input type="number" placeholder="speed m/s (30–60)" value={speed} onChange={(e) => setSpeed(e.target.value)} />
           <Input type="number" placeholder="altitude m" value={altitude} onChange={(e) => setAltitude(e.target.value)} />
@@ -117,9 +215,10 @@ export default function CommandPanel() {
             Send HSA
           </Button>
         </div>
+        )}
 
+        {cmdType === 'orbit' && (
         <div className="flex flex-col gap-2">
-          <Label className="text-muted-foreground text-xs">Orbit: fly a repeating pattern about this point</Label>
           <div className="flex gap-1">
             <Button
               size="sm"
@@ -179,6 +278,71 @@ export default function CommandPanel() {
             Send orbit ({pattern})
           </Button>
         </div>
+        )}
+
+        {cmdType === 'waypoint' && (
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant={editing ? 'default' : 'outline'}
+              onClick={() => useMissionStore.getState().setEditing(!editing)}
+            >
+              {editing ? '● Placing' : 'Edit'}
+            </Button>
+            <Button size="sm" variant="outline" disabled={waypoints.length === 0} onClick={clearWaypoints}>
+              Clear
+            </Button>
+            <Button size="sm" className="ml-auto" disabled={waypoints.length < 2} onClick={sendWaypoints}>
+              Send
+            </Button>
+          </div>
+
+          {editing && (
+            <Label className="text-muted-foreground text-xs">Click inside a geozone to add a waypoint to {targetKey}.</Label>
+          )}
+
+          {waypoints.length === 0 ? (
+            <span className="text-muted-foreground text-xs">No waypoints for {targetKey}.</span>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {waypoints.map((w, i) => (
+                <div key={`${i}-${revision}`} className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-1">
+                    <Badge variant="secondary" className="w-5 justify-center tabular-nums">
+                      {i + 1}
+                    </Badge>
+                    <Input type="number" className="h-7 w-20" defaultValue={w.altM} onBlur={commitAlt(i)} />
+                    <span className="text-muted-foreground text-[10px]">m</span>
+                    <div className="ml-auto flex gap-0.5">
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={i === 0} onClick={() => useMissionStore.getState().moveWaypoint(targetKey, i, -1)}>
+                        ↑
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" disabled={i === waypoints.length - 1} onClick={() => useMissionStore.getState().moveWaypoint(targetKey, i, 1)}>
+                        ↓
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => useMissionStore.getState().removeWaypoint(targetKey, i)}>
+                        ✕
+                      </Button>
+                    </div>
+                  </div>
+                  <span className="text-muted-foreground pl-6 text-[10px] tabular-nums">
+                    {w.lat.toFixed(4)}, {w.lng.toFixed(4)}
+                    {i < waypoints.length - 1 &&
+                      ` · ${Math.round(metersBetween([w.lng, w.lat], [waypoints[i + 1].lng, waypoints[i + 1].lat]))}m to #${i + 2}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {warnText && (
+            <Badge variant="destructive" className="w-full justify-start whitespace-normal">
+              {warnText}
+            </Badge>
+          )}
+        </div>
+        )}
 
         {lastAck && (
           <Badge

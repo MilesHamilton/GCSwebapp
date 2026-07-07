@@ -1,19 +1,11 @@
 import type { TimedPoint, Geozone } from '../state/trackStore'
 import type { Waypoint } from '../state/missionStore'
 import type { TimelineEvent } from '@/components/ui/timeline'
-import { pointInAnyGeozone } from './geo'
+import { pointInAnyGeozone, metersBetween } from './geo'
 
 // Mirror the sim's waypoint capture radius (sim.py WP_CAPTURE_M) so replay markers land
 // where the vehicle actually advanced to the next waypoint.
 const WP_CAPTURE_M = 150
-const M_PER_DEG_LAT = 111320
-
-// Ground distance (m) between two [lng, lat] points (equirectangular; fine at this scale).
-function metersBetween(a: [number, number], b: [number, number]): number {
-  const north = (b[1] - a[1]) * M_PER_DEG_LAT
-  const east = (b[0] - a[0]) * M_PER_DEG_LAT * Math.cos((a[1] * Math.PI) / 180)
-  return Math.hypot(north, east)
-}
 
 // Derive replay markers from a finished recording: the two endpoints, a breach/return marker
 // each time a vehicle's track crosses a geozone boundary, and a "reached waypoint #N" marker
@@ -21,7 +13,7 @@ function metersBetween(a: [number, number], b: [number, number]): number {
 export function computeTimelineEvents(
   recording: Record<string, TimedPoint[]>,
   geozones: Geozone[],
-  paths: Record<string, Waypoint[]>,
+  sentPaths: Record<string, Waypoint[]>,
   bounds: [number, number] | null,
 ): TimelineEvent[] {
   if (!bounds) return []
@@ -46,7 +38,7 @@ export function computeTimelineEvents(
       }
     }
     // Waypoint captures: walk the track advancing through this vehicle's route in order.
-    const wps = paths[id]
+    const wps = sentPaths[id]
     if (wps && wps.length > 0) {
       let wpIndex = 0
       for (const p of pts) {
